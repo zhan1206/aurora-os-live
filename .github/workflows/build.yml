@@ -2,7 +2,7 @@
 #  AuroraOS CI/CD Pipeline
 #  ─────────────────────────────────────────────────────────────────────
 #  Triggers: push (any branch), pull_request, manual dispatch
-#  Jobs:     lint → build-linux (matrix) + build-macos → compliance
+#  Jobs:     checkstyle → lint → clang-tidy → build-linux (matrix) + build-macos → compliance
 #  ─────────────────────────────────────────────────────────────────────
 
 name: CI Build & Test
@@ -39,12 +39,31 @@ defaults:
 jobs:
 
   # ────────────────────────────────────────────────────────────────────
-  #  Lint — Static code analysis (runs first, independent)
+  #  Checkstyle — Code style enforcement (runs first, independent)
+  # ────────────────────────────────────────────────────────────────────
+  checkstyle:
+    name: 'Code Style Check'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run code style checks
+        continue-on-error: true
+        run: |
+          chmod +x .github/workflows/checkstyle.sh
+          .github/workflows/checkstyle.sh
+
+  # ────────────────────────────────────────────────────────────────────
+  #  Lint — Static code analysis (runs after checkstyle)
   # ────────────────────────────────────────────────────────────────────
   lint:
     name: 'Lint & Static Analysis'
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    needs: checkstyle
+    if: ${{ !cancelled() }}
 
     steps:
       - name: Checkout
@@ -106,6 +125,50 @@ jobs:
           echo "::endgroup::"
 
   # ────────────────────────────────────────────────────────────────────
+  #  cppcheck — Static analysis (non-blocking, informational only)
+  # ────────────────────────────────────────────────────────────────────
+  cppcheck:
+    name: 'cppcheck Static Analysis'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: lint
+    if: ${{ !cancelled() }}
+    continue-on-error: true
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install cppcheck
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq cppcheck
+
+      - name: Run cppcheck
+        run: |
+          echo "::group::cppcheck Analysis"
+          cppcheck --enable=all --inconclusive --suppress=missingIncludeSystem \
+            --suppress=unusedFunction --suppress=unmatchedSuppression \
+            --inline-suppr \
+            -I kernel/include \
+            --template='::{severity} file={file},line={line},col={column}::{message}' \
+            kernel/ arch/ boot/ 2>&1 | tee cppcheck_report.txt || true
+
+          ERROR_COUNT=$(grep -c '::error' cppcheck_report.txt 2>/dev/null || echo 0)
+          WARN_COUNT=$(grep -c '::warning' cppcheck_report.txt 2>/dev/null || echo 0)
+          echo "  Errors: $ERROR_COUNT"
+          echo "  Warnings: $WARN_COUNT"
+          echo "::endgroup::"
+
+          if [ -s cppcheck_report.txt ]; then
+            echo "## cppcheck Results" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+            cat cppcheck_report.txt >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  # ────────────────────────────────────────────────────────────────────
   #  Build + Test — Linux (matrix: release + debug)
   # ────────────────────────────────────────────────────────────────────
   build-linux:
@@ -164,20 +227,31 @@ jobs:
 
       # ── Build Kernel ────────────────────────────────────────────
       - name: Build kernel (${{ matrix.build-type }})
+        id: build
         run: |
           echo "::group::Kernel build"
+          BUILD_START=$(date +%s)
           if [ "${{ matrix.build-type }}" = "debug" ]; then
             make debug
           else
             make
           fi
+          BUILD_END=$(date +%s)
+          BUILD_TIME=$((BUILD_END - BUILD_START))
+          echo "build_time=${BUILD_TIME}" >> "$GITHUB_OUTPUT"
+          echo "Build completed in ${BUILD_TIME}s"
           echo "::endgroup::"
 
       - name: Create ISO
+        id: iso
         run: |
           echo "::group::ISO generation"
           make iso
           ls -lh os.iso
+          KERNEL_SIZE=$(stat -c%s build/kernel.elf 2>/dev/null || echo 0)
+          ISO_SIZE=$(stat -c%s os.iso 2>/dev/null || echo 0)
+          echo "kernel_size=${KERNEL_SIZE}" >> "$GITHUB_OUTPUT"
+          echo "iso_size=${ISO_SIZE}" >> "$GITHUB_OUTPUT"
           echo "::endgroup::"
 
       # ── QEMU Boot Test + Self-Test Verification ─────────────────
@@ -223,6 +297,52 @@ jobs:
           name: qemu-output-linux-${{ matrix.build-type }}
           path: qemu_output.log
           retention-days: 3
+
+      # ── Build Summary ───────────────────────────────────────────
+      - name: Build summary
+        if: always()
+        run: |
+          FILES_COMPILED=$(find kernel/ arch/ -type f \( -name '*.c' -o -name '*.S' \) 2>/dev/null | wc -l)
+          KERNEL_SIZE=${{ steps.iso.outputs.kernel_size }}
+          ISO_SIZE=${{ steps.iso.outputs.iso_size }}
+          BUILD_TIME=${{ steps.build.outputs.build_time }}
+
+          # Format sizes
+          KERNEL_SIZE_KB=$(awk "BEGIN {printf \"%.1f\", ${KERNEL_SIZE}/1024}")
+          ISO_SIZE_MB=$(awk "BEGIN {printf \"%.1f\", ${ISO_SIZE}/1048576}")
+
+          # Parse self-test results from QEMU output
+          if [ -f qemu_output.log ]; then
+            TOTAL_TESTS=$(grep -c '\[PASS\]\|\[FAIL\]' qemu_output.log 2>/dev/null || echo 0)
+            PASSED_TESTS=$(grep -c '\[PASS\]' qemu_output.log 2>/dev/null || echo 0)
+            FAILED_TESTS=$(grep -c '\[FAIL\]' qemu_output.log 2>/dev/null || echo 0)
+          else
+            TOTAL_TESTS=0
+            PASSED_TESTS=0
+            FAILED_TESTS=0
+          fi
+
+          echo "## Build Summary — ${{ matrix.build-type }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Metric | Value |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|--------|-------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Build Time | ${BUILD_TIME}s |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Files Compiled | ${FILES_COMPILED} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Kernel Size | ${KERNEL_SIZE} bytes (${KERNEL_SIZE_KB} KB) |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| ISO Size | ${ISO_SIZE} bytes (${ISO_SIZE_MB} MB) |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Self-Tests Passed | ${PASSED_TESTS}/${TOTAL_TESTS} |" >> "$GITHUB_STEP_SUMMARY"
+          if [ "${FAILED_TESTS}" -gt 0 ]; then
+            echo "| Self-Tests Failed | ${FAILED_TESTS} :x: |" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "| Self-Tests Failed | 0 :white_check_mark: |" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "${FAILED_TESTS}" -gt 0 ]; then
+            echo ":x: **Build completed with ${FAILED_TESTS} test failure(s)**" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo ":rocket: **${{ matrix.build-type }} build successful**" >> "$GITHUB_STEP_SUMMARY"
+          fi
 
   # ────────────────────────────────────────────────────────────────────
   #  Build + Smoke Test — macOS (cross-compile)
@@ -339,6 +459,7 @@ jobs:
             "LICENSE"
             "CHANGELOG.md"
             "CONTRIBUTING.md"
+            "first-contributions.md"
             "Makefile"
             "linker.ld"
             ".gitignore"

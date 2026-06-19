@@ -1,0 +1,255 @@
+# ─────────────────────────────────────────────────────────────────────
+#  AuroraOS Daily Automated Build
+#  ─────────────────────────────────────────────────────────────────────
+#  Trigger: schedule (daily at 6am UTC), workflow_dispatch
+#  Jobs:    Build release + debug, upload ISO artifacts with date,
+#           QEMU boot test, verify self-tests, post summary.
+#  ─────────────────────────────────────────────────────────────────────
+
+name: Daily Build
+
+# ── Triggers ──────────────────────────────────────────────────────────
+
+on:
+  schedule:
+    - cron: '0 6 * * *'  # Daily at 6am UTC
+  workflow_dispatch:
+    inputs:
+      upload-artifacts:
+        description: 'Upload build artifacts'
+        required: false
+        default: 'true'
+        type: choice
+        options: ['true', 'false']
+
+# ── Global settings ───────────────────────────────────────────────────
+
+concurrency:
+  group: daily-build-${{ github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+# ── Jobs ──────────────────────────────────────────────────────────────
+
+jobs:
+
+  # ────────────────────────────────────────────────────────────────────
+  #  Daily Build — Release + Debug
+  # ────────────────────────────────────────────────────────────────────
+  build:
+    name: 'Daily Build (${{ matrix.build-type }})'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    strategy:
+      fail-fast: false
+      matrix:
+        build-type:
+          - release
+          - debug
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ── Set date for artifact naming ─────────────────────────────
+      - name: Set build date
+        id: date
+        run: |
+          echo "date=$(date +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+          echo "datetime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
+      # ── Install dependencies ─────────────────────────────────────
+      - name: Cache APT packages
+        uses: actions/cache@v4
+        id: cache-apt
+        with:
+          path: /var/cache/apt/archives
+          key: apt-daily-${{ runner.os }}-${{ hashFiles('.github/workflows/daily-build.yml') }}
+          restore-keys: |
+            apt-daily-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends \
+            build-essential \
+            xorriso \
+            grub-pc-bin \
+            mtools \
+            qemu-system-x86 \
+            qemu-utils \
+            python3
+
+      # ── Build Userspace ──────────────────────────────────────────
+      - name: Build userspace programs
+        run: |
+          echo "::group::Build userspace"
+          make -C userspace -f Makefile
+          echo "::endgroup::"
+
+      - name: Embed userspace binaries
+        run: |
+          echo "::group::Embed binaries"
+          python3 scripts/embed_binary.py userspace/hello kernel/embedded_files.c
+          python3 scripts/embed_binary.py userspace/shell kernel/embedded_files.c
+          echo "::endgroup::"
+
+      # ── Build Kernel ─────────────────────────────────────────────
+      - name: Build kernel (${{ matrix.build-type }})
+        id: build
+        run: |
+          echo "::group::Kernel build"
+          BUILD_START=$(date +%s)
+          if [ "${{ matrix.build-type }}" = "debug" ]; then
+            make debug
+          else
+            make
+          fi
+          BUILD_END=$(date +%s)
+          BUILD_TIME=$((BUILD_END - BUILD_START))
+          echo "build_time=${BUILD_TIME}" >> "$GITHUB_OUTPUT"
+          echo "Build completed in ${BUILD_TIME}s"
+          echo "::endgroup::"
+
+      - name: Create ISO
+        id: iso
+        run: |
+          echo "::group::ISO generation"
+          make iso
+          ls -lh os.iso
+          KERNEL_SIZE=$(stat -c%s build/kernel.elf 2>/dev/null || echo 0)
+          ISO_SIZE=$(stat -c%s os.iso 2>/dev/null || echo 0)
+          echo "kernel_size=${KERNEL_SIZE}" >> "$GITHUB_OUTPUT"
+          echo "iso_size=${ISO_SIZE}" >> "$GITHUB_OUTPUT"
+          echo "::endgroup::"
+
+      # ── QEMU Boot Test ───────────────────────────────────────────
+      - name: QEMU boot test
+        id: qemu-test
+        uses: ./.github/actions/qemu-boot-test
+        with:
+          iso-path: os.iso
+          boot-timeout: '90'
+          memory: '256'
+          verify-self-tests: 'true'
+
+      - name: Generate JUnit report
+        if: always()
+        run: |
+          python3 scripts/generate_junit_report.py qemu_output.log test-results.xml 2>/dev/null || {
+            echo "::warning::JUnit report generation failed (non-fatal)"
+          }
+
+      # ── Upload ISO artifact (14-day retention) ───────────────────
+      - name: Upload ISO artifact
+        if: ${{ success() && github.event.inputs.upload-artifacts != 'false' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: aurora-os-daily-${{ matrix.build-type }}-${{ steps.date.outputs.date }}
+          path: os.iso
+          retention-days: 14
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-daily-${{ matrix.build-type }}-${{ steps.date.outputs.date }}
+          path: test-results.xml
+          retention-days: 14
+
+      - name: Upload QEMU output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qemu-output-daily-${{ matrix.build-type }}-${{ steps.date.outputs.date }}
+          path: qemu_output.log
+          retention-days: 14
+
+      # ── Build Summary ────────────────────────────────────────────
+      - name: Build summary
+        if: always()
+        run: |
+          FILES_COMPILED=$(find kernel/ arch/ -type f \( -name '*.c' -o -name '*.S' \) 2>/dev/null | wc -l)
+          KERNEL_SIZE=${{ steps.iso.outputs.kernel_size }}
+          ISO_SIZE=${{ steps.iso.outputs.iso_size }}
+          BUILD_TIME=${{ steps.build.outputs.build_time }}
+          BUILD_DATE="${{ steps.date.outputs.date }}"
+
+          KERNEL_SIZE_KB=$(awk "BEGIN {printf \"%.1f\", ${KERNEL_SIZE}/1024}")
+          ISO_SIZE_MB=$(awk "BEGIN {printf \"%.1f\", ${ISO_SIZE}/1048576}")
+
+          if [ -f qemu_output.log ]; then
+            TOTAL_TESTS=$(grep -c '\[PASS\]\|\[FAIL\]' qemu_output.log 2>/dev/null || echo 0)
+            PASSED_TESTS=$(grep -c '\[PASS\]' qemu_output.log 2>/dev/null || echo 0)
+            FAILED_TESTS=$(grep -c '\[FAIL\]' qemu_output.log 2>/dev/null || echo 0)
+          else
+            TOTAL_TESTS=0
+            PASSED_TESTS=0
+            FAILED_TESTS=0
+          fi
+
+          # Determine build status
+          if [ "${FAILED_TESTS}" -gt 0 ]; then
+            STATUS=":x: FAILED"
+            STATUS_BADGE="failing"
+          else
+            STATUS=":white_check_mark: PASSED"
+            STATUS_BADGE="passing"
+          fi
+
+          echo "## Daily Build — ${{ matrix.build-type }} ($BUILD_DATE)" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Metric | Value |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|--------|-------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Status | $STATUS |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Build Time | ${BUILD_TIME}s |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Files Compiled | ${FILES_COMPILED} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Kernel Size | ${KERNEL_SIZE} bytes (${KERNEL_SIZE_KB} KB) |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| ISO Size | ${ISO_SIZE} bytes (${ISO_SIZE_MB} MB) |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Self-Tests | ${PASSED_TESTS}/${TOTAL_TESTS} passed |" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+
+          # Badge info for README
+          echo "### Build Status Badge" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Add this badge to your README:" >> "$GITHUB_STEP_SUMMARY"
+          echo "\`\`\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "[![Daily Build](https://img.shields.io/badge/daily_build-${STATUS_BADGE}-${STATUS_BADGE})](https://github.com/\${{ github.repository }}/actions/workflows/daily-build.yml)" >> "$GITHUB_STEP_SUMMARY"
+          echo "\`\`\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+
+          echo "**Artifact:** aurora-os-daily-${{ matrix.build-type }}-$BUILD_DATE" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "---" >> "$GITHUB_STEP_SUMMARY"
+
+  # ────────────────────────────────────────────────────────────────────
+  #  Combined Summary  
+  # ────────────────────────────────────────────────────────────────────
+  summary:
+    name: 'Daily Build Summary'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    needs: build
+    if: ${{ always() }}
+    steps:
+      - name: Post combined summary
+        run: |
+          echo "## AuroraOS Daily Build — $(date -u +%Y-%m-%d)" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Job | Result |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|-----|--------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Release Build | ${{ needs.build.result }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Debug Build | ${{ needs.build.result }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "${{ needs.build.result }}" = "success" ]; then
+            echo ":rocket: **Daily build passed** — all artifacts uploaded with 14-day retention." >> "$GITHUB_STEP_SUMMARY"
+          elif [ "${{ needs.build.result }}" = "failure" ]; then
+            echo ":x: **Daily build failed** — check detailed logs above for failure reason." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo ":warning: **Daily build status: ${{ needs.build.result }}**" >> "$GITHUB_STEP_SUMMARY"
+          fi

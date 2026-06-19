@@ -79,7 +79,7 @@ extern void ap_entry(void);
 #define TRAMP_DATA_CPU_ID   0x03FC
 #define TRAMP_DATA_ENTRY    0x03F0  /* same as PML4 (only one needed at a time) */
 
-static const uint8_t trampoline_code[] = {
+static const uint8_t trampoline_code[] __attribute__((unused)) = {
     /* ============================================
      * Offset 0x0000: 16-bit real mode code
      * ============================================ */
@@ -457,7 +457,6 @@ static struct acpi_rsdp *find_rsdp(void *mb_info) {
             uint32_t size;
         };
 
-        uint8_t *tag_ptr = (uint8_t *)mb_info + 8;
         uint32_t *ptr = (uint32_t *)mb_info;
         uint32_t total_size = ptr[0];
 
