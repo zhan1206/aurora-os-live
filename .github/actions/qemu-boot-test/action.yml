@@ -40,8 +40,15 @@ runs:
 
         echo "::group::QEMU Boot — $ISO ($MEM MB, ${TIMEOUT}s timeout)"
 
+        # Create a temporary directory for QEMU output artifacts
+        QEMU_TMPDIR=$(mktemp -d)
+        echo "QEMU temp dir: $QEMU_TMPDIR"
+
+        # Run QEMU with serial output to file, also capture via stdio
         qemu-system-x86_64 -m "${MEM}M" -cdrom "$ISO" -nographic -no-reboot \
-          -serial stdio 2>&1 | tee qemu_output.log &
+          -serial file:"$QEMU_TMPDIR/serial.log" \
+          -monitor unix:"$QEMU_TMPDIR/monitor.sock",server,nowait \
+          2>&1 | tee qemu_output.log &
         QEMU_PID=$!
 
         BOOT_OK=0
@@ -56,9 +63,16 @@ runs:
           fi
           if ! kill -0 $QEMU_PID 2>/dev/null; then
             echo "FAIL: QEMU exited unexpectedly (exit code: $?)"
-            echo "Last 50 lines of output:"
-            tail -50 qemu_output.log
+            echo "::group::QEMU Output (last 100 lines)"
+            tail -100 qemu_output.log
+            echo "::endgroup::"
+            echo "::group::Serial Log (last 100 lines)"
+            tail -100 "$QEMU_TMPDIR/serial.log" 2>/dev/null || echo "(no serial log)"
+            echo "::endgroup::"
             echo "booted=0" >> "$GITHUB_OUTPUT"
+            # Save artifacts for upload
+            cp qemu_output.log "$QEMU_TMPDIR/console.log" 2>/dev/null || true
+            echo "qemu_tmpdir=$QEMU_TMPDIR" >> "$GITHUB_OUTPUT"
             exit 1
           fi
           sleep 1
@@ -66,19 +80,42 @@ runs:
 
         if [ "$BOOT_OK" != "1" ]; then
           echo "FAIL: Kernel did not reach 'System Ready' within ${TIMEOUT}s"
-          echo "Last 50 lines of output:"
-          tail -50 qemu_output.log
+          echo "::group::QEMU Output (last 100 lines)"
+          tail -100 qemu_output.log
+          echo "::endgroup::"
+          echo "::group::Serial Log (last 100 lines)"
+          tail -100 "$QEMU_TMPDIR/serial.log" 2>/dev/null || echo "(no serial log)"
+          echo "::endgroup::"
           echo "booted=0" >> "$GITHUB_OUTPUT"
+          # Save artifacts for upload
+          cp qemu_output.log "$QEMU_TMPDIR/console.log" 2>/dev/null || true
+          echo "qemu_tmpdir=$QEMU_TMPDIR" >> "$GITHUB_OUTPUT"
           exit 1
         fi
 
         # Give the kernel a moment to finish self-tests
         sleep 2
 
+        # Attempt to capture screenshot via QMP
+        if [ -S "$QEMU_TMPDIR/monitor.sock" ]; then
+          echo '{"execute":"qmp_capabilities"}' | nc -U "$QEMU_TMPDIR/monitor.sock" -w 1 2>/dev/null || true
+          echo '{"execute":"screendump","arguments":{"filename":"screenshot.ppm"}}' | nc -U "$QEMU_TMPDIR/monitor.sock" -w 2 2>/dev/null || true
+          if [ -f screenshot.ppm ]; then
+            # Convert PPM to PNG if ImageMagick is available
+            if command -v convert &>/dev/null; then
+              convert screenshot.ppm "$QEMU_TMPDIR/screenshot.png" 2>/dev/null || true
+            else
+              cp screenshot.ppm "$QEMU_TMPDIR/screenshot.ppm" 2>/dev/null || true
+            fi
+            echo "Screenshot captured"
+          fi
+        fi
+
         # Cleanup
         kill $QEMU_PID 2>/dev/null || true
         wait $QEMU_PID 2>/dev/null || true
 
+        echo "qemu_tmpdir=$QEMU_TMPDIR" >> "$GITHUB_OUTPUT"
         echo "::endgroup::"
 
     - name: Verify self-tests
@@ -148,3 +185,19 @@ runs:
         python3 scripts/generate_junit_report.py qemu_output.log test-results.xml 2>/dev/null || {
           echo "::warning::JUnit report generation failed (non-fatal)"
         }
+
+    - name: Upload QEMU debug artifacts
+      if: failure()
+      shell: bash
+      run: |
+        echo "::group::QEMU Failure Debug Info"
+        echo "=== Full Console Log ==="
+        cat qemu_output.log 2>/dev/null || echo "(no console log)"
+        echo ""
+        echo "=== Full Serial Log ==="
+        if [ -n "${QEMU_TMPDIR:-}" ] && [ -f "$QEMU_TMPDIR/serial.log" ]; then
+          cat "$QEMU_TMPDIR/serial.log"
+        else
+          echo "(no serial log)"
+        fi
+        echo "::endgroup::"

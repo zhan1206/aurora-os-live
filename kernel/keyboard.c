@@ -16,6 +16,7 @@
 #include "console.h"
 #include "sched.h"
 #include "signal.h"
+#include "perf.h"
 #include <stdint.h>
 
 /* ================================================================
@@ -105,6 +106,9 @@ static const char scancode_shifted[] = {
 
 void keyboard_c_handler(void *stack) {
     (void)stack;
+
+    /* Performance counter: count each keyboard interrupt */
+    perf_inc(PERF_IRQ_COUNT);
 
     uint8_t sc = inb(0x60);
 

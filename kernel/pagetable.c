@@ -23,6 +23,7 @@
 #include "mem.h"
 #include "signal.h"
 #include "sched.h"
+#include "perf.h"
 #include <stdint.h>
 #include <string.h>
 
@@ -91,8 +92,6 @@ uint64_t get_kernel_cr3(void) {
  * The kernel identity-maps physical memory 0..kernel_end (~1GB).
  * phys_to_virt validates that a physical address is within this range.
  */
-#define KERNEL_PHYS_MAX  (0x40000000ULL)  /* 1GB identity-mapped */
-
 static inline uint64_t *phys_to_virt(uint64_t pa) {
     /* Assert: physical address must be within identity-mapped range.
      * The kernel identity-maps 0..1GB, so any physical address
@@ -565,6 +564,9 @@ void pf_handler_c(uint64_t error_code) {
     uint64_t cr2;
     asm volatile ("mov %%cr2, %0" : "=r"(cr2));
 
+    /* Performance counter: count all page faults */
+    perf_inc(PERF_PAGE_FAULTS);
+
     int present = (error_code & 1) != 0;
     int write   = (error_code & 2) != 0;
     int user    = (error_code & 4) != 0;
@@ -644,6 +646,9 @@ void pf_handler_c(uint64_t error_code) {
 
         /* New page ref_count = 1 (implicit in alloc_page) */
         invlpg(cr2);
+
+        /* Performance counter: COW page fault */
+        perf_inc(PERF_COW_COUNT);
 
         log_printf(LOG_LEVEL_DEBUG, "COW: resolved at %p, new phys=%p\n",
                    (void *)cr2, new_page);

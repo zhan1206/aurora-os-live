@@ -65,6 +65,15 @@ struct slab_cache {
 void phys_mem_init(void *mb_info);
 
 /*
+ * phys_mem_init_uefi: Initialize physical memory manager from UEFI boot info.
+ * @bi: pointer to struct uefi_boot_info passed by the UEFI bootloader.
+ *
+ * Parses the UEFI memory map, builds the buddy allocator,
+ * and reserves kernel/ACPI/MMIO regions.
+ */
+void phys_mem_init_uefi(void *bi);
+
+/*
  * alloc_pages: Allocate 2^order contiguous physical pages.
  * @order: allocation order (0..MAX_ORDER).
  * Returns: physical address of first page, or NULL on failure.

@@ -18,6 +18,14 @@
 #include "pagetable.h"
 #include "syscall.h"
 #include "fs.h"
+#include "smp.h"
+#include "block_dev.h"
+#include "perf.h"
+#include "sysctl.h"
+#include "stack_protect.h"
+#include "aslr.h"
+#include "module.h"
+#include "../boot/boot_info.h"
 
 /* ================================================================
  * Global Theme State (defined in theme.h)
@@ -123,14 +131,27 @@ static void task_fn2(void) {
  * @mb_info:  Multiboot info structure pointer (physical address)
  * ================================================================ */
 void kernel_main(uint32_t magic, void *mb_info) {
-    (void)magic;  /* phys_mem_init auto-detects MB1/MB2 from mb_info */
+    /* Detect UEFI boot vs Multiboot boot */
+    int is_uefi = (magic == UEFI_BOOT_MAGIC);
+    struct uefi_boot_info *uefi_bi = (void *)0;
+    if (is_uefi) {
+        uefi_bi = (struct uefi_boot_info *)mb_info;
+    }
 
     /* Early serial init — must be first for panic messages */
     serial_init();
     log_set_level(LOG_LEVEL_DEBUG);  /* Enable debug logging during boot */
 
+    /* Stack protector must be initialized before any C code with stack arrays */
+    stack_protect_init();
+
     /* === Phase 1: Boot Splash Screen === */
-    console_init();
+    if (is_uefi && uefi_bi->fb_valid) {
+        console_init_fb(uefi_bi->fb_addr, uefi_bi->fb_width, uefi_bi->fb_height,
+                        uefi_bi->fb_pitch, uefi_bi->fb_bpp);
+    } else {
+        console_init();
+    }
     console_clear();
     console_hide_cursor();
 
@@ -155,7 +176,7 @@ void kernel_main(uint32_t magic, void *mb_info) {
     console_write_ansi(SGR_RESET);
     console_vpad(1);
 
-    int boot_step = 0, boot_total = 10;
+    int boot_step = 0, boot_total = 13;
     #define BOOT_STEP() do { \
         boot_step++; \
         console_write_ansi(BOOT_PROGRESS_FILL); \
@@ -170,7 +191,11 @@ void kernel_main(uint32_t magic, void *mb_info) {
 
     /* Physical memory — auto-detects Multiboot1 or Multiboot2 */
     uint64_t mem_mb = 64;
-    phys_mem_init(mb_info);
+    if (is_uefi) {
+        phys_mem_init_uefi(uefi_bi);
+    } else {
+        phys_mem_init(mb_info);
+    }
     {
         uint64_t total, free, used;
         mem_get_stats(&total, &free, &used);
@@ -190,6 +215,10 @@ void kernel_main(uint32_t magic, void *mb_info) {
 
     slab_init();
     console_status_ok("Slab allocator (8 size classes)");
+    BOOT_STEP();
+
+    aslr_init();
+    console_status_ok("ASLR initialized (xorshift64 PRNG)");
     BOOT_STEP();
 
     page_table_init();
@@ -212,6 +241,15 @@ void kernel_main(uint32_t magic, void *mb_info) {
     BOOT_STEP();
 
     /*
+     * Initialize SMP after IRQ system is ready.
+     * This parses ACPI MADT, detects CPUs, and starts APs.
+     * Falls back to single-CPU mode if no ACPI/MADT found.
+     */
+    smp_init(mb_info);
+    console_status_ok("SMP (detected CPUs)");
+    BOOT_STEP();
+
+    /*
      * rodata_protect must be called AFTER irq_init() so that the IDT
      * is set up to handle any page faults that may occur during page
      * table modification (e.g., TLB shootdown, split_huge_page).
@@ -226,9 +264,22 @@ void kernel_main(uint32_t magic, void *mb_info) {
     console_status_ok("PIT timer (100 Hz)");
     BOOT_STEP();
 
+    perf_init();
+    console_status_ok("Performance counters");
+    BOOT_STEP();
+
+    sysctl_init();
+    console_status_ok("Sysctl interface");
+    BOOT_STEP();
+
     /* === Phase 3.5: File System === */
+    ramdisk_init(0);  /* 16 MiB RAM disk for testing */
     fs_init();
     console_status_ok("VFS + RamFS mounted");
+    BOOT_STEP();
+
+    module_init();
+    console_status_ok("Module loader (kernel symbol table)");
     BOOT_STEP();
 
     #undef BOOT_STEP

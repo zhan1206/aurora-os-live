@@ -37,6 +37,11 @@
 #define PAGE_SHIFT     12
 #define PAGE_MASK      0xFFFFFFFFFFFFF000ULL
 
+/* Identity-mapped physical memory range (0..KERNEL_PHYS_MAX).
+ * The kernel identity-maps physical memory 0..kernel_end (~1GB).
+ * phys_to_virt validates that a physical address is within this range. */
+#define KERNEL_PHYS_MAX  (0x40000000ULL)  /* 1GB identity-mapped */
+
 /* Physical address mask for PTE (bits 12-51) */
 #define PTE_ADDR_MASK  0x000FFFFFFFFFF000ULL
 

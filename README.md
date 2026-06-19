@@ -1,6 +1,6 @@
 # AuroraOS — 自研 x86_64 操作系统
 
-[![CI Build](https://github.com/用户名/AuroraOS/actions/workflows/build.yml/badge.svg)](https://github.com/用户名/AuroraOS/actions/workflows/build.yml)
+[![CI Build](https://github.com/zhan1206/aurora-os/actions/workflows/build.yml/badge.svg)](https://github.com/zhan1206/aurora-os/actions/workflows/build.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Lines of Code](https://img.shields.io/badge/code-~8,000%20lines-blue)](kernel/)
 [![Self Tests](https://img.shields.io/badge/tests-16/16-brightgreen)](kernel/selftest.c)
@@ -35,7 +35,7 @@
 sudo apt install -y build-essential xorriso grub-pc-bin mtools qemu-system-x86
 
 # 2. 构建并运行
-git clone https://github.com/用户名/AuroraOS.git
+git clone https://github.com/zhan1206/aurora-os.git
 cd AuroraOS
 make iso
 make run
@@ -100,7 +100,7 @@ sudo ln -sf /usr/bin/x86_64-linux-gnu-ld /usr/local/bin/x86_64-elf-ld
 # https://wiki.osdev.org/GCC_Cross-Compiler
 
 # 构建项目
-git clone https://github.com/用户名/AuroraOS.git
+git clone https://github.com/zhan1206/aurora-os.git
 cd AuroraOS
 make        # Release 构建
 make iso    # 生成 ISO 镜像
@@ -134,7 +134,7 @@ make iso
 brew install x86_64-elf-gcc x86_64-elf-binutils qemu xorriso mtools make
 
 # 构建项目
-git clone https://github.com/用户名/AuroraOS.git
+git clone https://github.com/zhan1206/aurora-os.git
 cd AuroraOS
 make iso
 ```

@@ -6,6 +6,7 @@
 #include "mem.h"
 #include "include/log.h"
 #include "pagetable.h"
+#include "aslr.h"
 
 static void user_trampoline(void) {
     for (;;) asm volatile ("hlt");
@@ -24,7 +25,7 @@ int create_user_task_from_entry(void (*entry)(void), uint64_t pml4_phys) {
         return -1;
     }
 
-    const uint64_t USER_STACK_TOP = 0x7FFFFFF000ULL;
+    const uint64_t USER_STACK_TOP = aslr_randomize_stack();
     const int pages = 2;
     uint64_t stack_base_v = USER_STACK_TOP - pages * 4096;
 

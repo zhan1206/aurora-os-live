@@ -1,5 +1,8 @@
 #include "include/log.h"
 #include "include/portio.h"
+#include "apic.h"
+#include "sched.h"
+#include "smp.h"
 #include <stdint.h>
 
 extern void load_idt(void);
@@ -18,6 +21,16 @@ void pic_remap(void) {
     outb(0xA1, 0x01);
     outb(0x21, 0x0);
     outb(0xA1, 0x0);
+}
+
+/*
+ * Disable legacy PIC by masking all interrupts.
+ * Called when IOAPIC is available to take over interrupt routing.
+ */
+void pic_disable(void) {
+    outb(0x21, 0xFF);  /* mask all on master PIC */
+    outb(0xA1, 0xFF);  /* mask all on slave PIC */
+    log_printf(LOG_LEVEL_INFO, "IRQ: legacy PIC disabled\n");
 }
 
 /*
@@ -72,6 +85,49 @@ extern void pf_handler(void);
 extern void irq0_handler(void);
 extern void irq1_handler(void);
 
+/* ================================================================
+ * IPI handlers (SMP Inter-Processor Interrupts)
+ *
+ * Vector 0xFE (IPI_RESCHED_VECTOR): Reschedule IPI
+ *   - Sent by smp_send_ipi() to trigger a reschedule on another CPU.
+ *   - Sets need_resched and sends EOI to the local APIC.
+ *
+ * Vector 0xFD (IPI_TLB_VECTOR): TLB shootdown IPI
+ *   - Sent by smp_tlb_shootdown() to invalidate a TLB entry on
+ *     other CPUs. The target address is passed via a shared variable.
+ *   - Flushes the TLB entry and sends EOI.
+ * ================================================================ */
+
+extern volatile int need_resched;
+
+/*
+ * ipi_resched_handler: Handler for reschedule IPI (vector 0xFE).
+ * Uses GCC's __attribute__((interrupt)) which automatically saves/restores
+ * all registers and uses iretq to return.
+ */
+__attribute__((interrupt))
+static void ipi_resched_handler(void *frame) {
+    (void)frame;
+    need_resched = 1;
+    lapic_eoi();
+}
+
+/*
+ * ipi_tlb_handler: Handler for TLB shootdown IPI (vector 0xFD).
+ * Invalidates the TLB entry for the address stored in the global
+ * shootdown_vaddr variable.
+ */
+static volatile uint64_t shootdown_vaddr = 0;
+
+__attribute__((interrupt))
+static void ipi_tlb_handler(void *frame) {
+    (void)frame;
+    if (shootdown_vaddr) {
+        asm volatile ("invlpg (%0)" :: "r"(shootdown_vaddr) : "memory");
+    }
+    lapic_eoi();
+}
+
 extern void keyboard_init(void);
 
 void irq_init(void) {
@@ -113,11 +169,21 @@ void irq_init(void) {
     idt_set_gate(32, (uint64_t)(uintptr_t)irq0_handler,    0x08, 0, 0x8E);
     /* IRQ1 (Keyboard) at vector 33 */
     idt_set_gate(33, (uint64_t)(uintptr_t)irq1_handler,    0x08, 0, 0x8E);
+    /* IPI: TLB shootdown (vector 0xFD) */
+    idt_set_gate(IPI_TLB_VECTOR, (uint64_t)(uintptr_t)&ipi_tlb_handler, 0x08, 0, 0x8E);
+    /* IPI: Reschedule (vector 0xFE) */
+    idt_set_gate(IPI_RESCHED_VECTOR, (uint64_t)(uintptr_t)&ipi_resched_handler, 0x08, 0, 0x8E);
 
     load_idt();
     pic_remap();
     keyboard_init();
     log_printf(LOG_LEVEL_INFO, "IRQ/IDT initialized\n");
+
+    /* Initialize LAPIC and APIC timer as per-CPU timer source.
+     * This replaces the PIT for scheduling ticks on SMP systems.
+     * On single-core (no APIC), the PIT continues to work. */
+    lapic_init();
+    lapic_timer_init(100);  /* 100 Hz timer */
 
     /* Enable interrupts — IDT and PIC are now configured, so it's safe.
      * Before this point, interrupts were disabled (from cli in entry.S)

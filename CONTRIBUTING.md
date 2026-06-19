@@ -27,6 +27,75 @@
 - 优先考虑项目的最佳利益
 
 ---
+<!-- highlight-start -->
+## 新手入门 (Beginner-Friendly)
+
+欢迎初学者参与！我们为不同经验水平的开发者准备了标签化的入门任务。
+
+### 任务标签说明
+
+| 标签 | 难度 | 说明 |
+|------|------|------|
+| `good first issue` | 入门 | 无需操作系统开发经验，适合首次贡献者 |
+| `beginner-friendly` | 初级 | 需要基本的 C 语言和系统编程知识 |
+| `help wanted` | 中级 | 需要一定的操作系统概念理解 |
+| `enhancement` | 高级 | 需要深入理解内核架构 |
+
+### 推荐入门任务
+
+以下是为新手准备的典型入门任务，标记为 `good first issue`：
+
+1. **实现一个简单的设备驱动** (`good first issue`)
+   - 难度：入门
+   - 描述：为 AuroraOS 实现一个简单的字符设备驱动（如 /dev/null 或 /dev/zero）
+   - 涉及模块：`kernel/vfs.c`, `kernel/file.c`
+   - 预计时间：2-4 小时
+   - 参考文件：`docs/modules.md`
+
+2. **添加系统调用示例** (`good first issue`)
+   - 难度：入门
+   - 描述：添加一个简单的系统调用（如 `SYS_UPTIME` 获取系统运行时间）
+   - 涉及模块：`kernel/syscall.c`, `kernel/syscall.h`, `userspace/libc.c`
+   - 预计时间：1-3 小时
+   - 参考文档：本文件的"添加新的系统调用"章节
+
+3. **改进 Shell 命令** (`beginner-friendly`)
+   - 难度：初级
+   - 描述：为 Shell 添加新命令或改进现有命令（如添加 `wc` 或 `head` 命令）
+   - 涉及模块：`kernel/shell.c`
+   - 预计时间：2-5 小时
+
+4. **编写单元测试** (`beginner-friendly`)
+   - 难度：初级
+   - 描述：为现有模块添加更多的自测试用例
+   - 涉及模块：`kernel/selftest.c`
+   - 预计时间：1-3 小时
+   - 参考：现有的 16 项自测试
+
+5. **文档翻译与改进** (`good first issue`)
+   - 难度：入门
+   - 描述：改进现有文档的清晰度，或添加代码注释
+   - 涉及模块：`docs/`, 各源文件
+   - 预计时间：1-2 小时
+
+6. **实现简单的用户态程序** (`beginner-friendly`)
+   - 难度：初级
+   - 描述：编写一个用户态程序（如计算器、猜数字游戏等）
+   - 涉及模块：`userspace/`
+   - 预计时间：2-4 小时
+
+### 新手参与流程
+
+1. 在 [GitHub Issues](https://github.com/zhan1206/aurora-os/issues) 中查找带 `good first issue` 或 `beginner-friendly` 标签的任务
+2. 在 Issue 下留言表明你想认领该任务
+3. Fork 仓库并创建分支
+4. 完成后提交 Pull Request（参考 [Pull Request 流程](#pull-request-流程)）
+5. 维护者会尽快审查并提供反馈
+
+**提示**：如果你对任务有疑问，请在 Issue 中直接提问，我们会尽力帮助你！
+
+---
+<!-- highlight-end -->
 
 ## 如何贡献
 
@@ -67,7 +136,7 @@ sudo ln -sf /usr/bin/x86_64-linux-gnu-ld /usr/local/bin/x86_64-elf-ld
 ### 克隆仓库
 
 ```bash
-git clone https://github.com/用户名/AuroraOS.git
+git clone https://github.com/zhan1206/aurora-os.git
 cd AuroraOS
 ```
 

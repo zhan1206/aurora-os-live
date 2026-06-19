@@ -29,6 +29,8 @@
 #include "sched.h"
 #include "signal.h"
 #include "mem.h"
+#include "perf.h"
+#include "module.h"
 #include <string.h>
 #include <stddef.h>
 
@@ -149,6 +151,8 @@ static void do_exec(const char *path);
 static void do_exit_cmd(const char *args);
 static void do_kill(const char *args);
 static void do_theme(const char *args);
+static void do_perf_cmd(const char *args);
+static void do_mod(const char *args);
 
 struct cmd_entry {
     const char *name;
@@ -173,6 +177,8 @@ static const struct cmd_entry cmd_table[] = {
     { "lock",    do_lock_cmd,  "Lock the screen" },
     { "ls",      do_ls_cmd,    "List directory contents" },
     { "mem",     do_mem_cmd,   "Show memory usage" },
+    { "mod",     do_mod,       "Module management (list|load|unload)" },
+    { "perf",    do_perf_cmd,  "Performance statistics" },
     { "ps",      do_ps_cmd,    "List running processes" },
     { "rm",      do_rm_cmd,    "Remove a file" },
     { "sysinfo", do_sysinfo_cmd,"Show system information" },
@@ -772,6 +778,15 @@ static void do_mem(void) {
     console_putc('\n');
 }
 
+static void do_perf(const char *args) {
+    while (*args == ' ') args++;
+    if (args && strcmp(args, "reset") == 0) {
+        perf_reset();
+    } else {
+        perf_dump();
+    }
+}
+
 static void do_sysinfo(void) {
     console_draw_box_top_double(" System Information ");
     console_write_ansi(SGR_RESET);
@@ -941,6 +956,63 @@ static void do_lock(void) {
     /* After unlock, return to shell */
     console_clear();
     console_draw_notification("info", "Screen unlocked");
+}
+
+/* ================================================================
+ * Module management command (§Mod)
+ * ================================================================ */
+static void do_mod(const char *args) {
+    while (*args == ' ') args++;
+
+    if (!args || !*args) {
+        console_error_with_hint("mod: missing subcommand", "Usage: mod <list|load|unload> [args]");
+        return;
+    }
+
+    /* Parse subcommand */
+    const char *sub = args;
+    while (*args && *args != ' ') args++;
+    size_t sub_len = (size_t)(args - sub);
+    while (*args == ' ') args++;
+
+    if (sub_len == 4 && strncmp(sub, "list", 4) == 0) {
+        module_list();
+    } else if (sub_len == 4 && strncmp(sub, "load", 4) == 0) {
+        if (!*args) {
+            console_error_with_hint("mod load: missing path", "Usage: mod load <path>");
+            return;
+        }
+        console_write_ansi("\x1b[90m");
+        console_write("Loading module: ");
+        console_write(args);
+        console_write("...");
+        console_write_ansi("\x1b[0m");
+        console_putc('\n');
+
+        if (module_load(args) == 0) {
+            console_write_ansi("\x1b[32m");
+            console_write("Module loaded successfully.");
+            console_write_ansi("\x1b[0m");
+            console_putc('\n');
+        } else {
+            console_error_with_hint("mod load: failed to load module", args);
+        }
+    } else if (sub_len == 6 && strncmp(sub, "unload", 6) == 0) {
+        if (!*args) {
+            console_error_with_hint("mod unload: missing name", "Usage: mod unload <name>");
+            return;
+        }
+        if (module_unload(args) == 0) {
+            console_write_ansi("\x1b[32m");
+            console_write("Module unloaded.");
+            console_write_ansi("\x1b[0m");
+            console_putc('\n');
+        } else {
+            console_error_with_hint("mod unload: failed", args);
+        }
+    } else {
+        console_error_with_hint("mod: unknown subcommand", "Usage: mod <list|load|unload>");
+    }
 }
 
 /* ================================================================
@@ -1195,6 +1267,7 @@ static void do_wait_cmd(const char *args)    { (void)args; do_wait(); }
 static void do_mem_cmd(const char *args)     { (void)args; do_mem(); }
 static void do_ls_cmd(const char *args)      { (void)args; do_ls(); }
 static void do_history_cmd(const char *args) { (void)args; do_history(); }
+static void do_perf_cmd(const char *args)    { do_perf(args); }
 
 /* Find command by name using binary search */
 static cmd_func_t cmd_find(const char *name, const char **args) {

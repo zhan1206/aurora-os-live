@@ -1,5 +1,7 @@
 /*
  * console.h - VGA text mode console with ANSI escape support
+ *
+ * Also supports framebuffer-based console when booted via UEFI GOP.
  */
 #ifndef CONSOLE_H
 #define CONSOLE_H
@@ -40,7 +42,13 @@ enum vga_color {
 #define ANSI_CYAN    6
 #define ANSI_WHITE   7
 
+/* Initialize VGA text mode console */
 void console_init(void);
+
+/* Initialize framebuffer-based console (for UEFI GOP boot) */
+void console_init_fb(uint64_t fb_addr, uint32_t width, uint32_t height,
+                     uint32_t pitch, uint32_t bpp);
+
 void console_putc(char c);
 void console_write(const char *s);
 

@@ -25,6 +25,8 @@
 #include "mem.h"
 #include "include/log.h"
 #include "include/assert.h"
+#include "../boot/boot_info.h"
+#include "perf.h"
 #include <stdint.h>
 #include <stddef.h>
 #include <string.h>
@@ -88,37 +90,37 @@ struct mb2_mmap_entry {
 #define MB2_MMAP_BADRAM     5
 
 /* ================================================================
- * Spinlock (simple CLI/STI for single-core)
+ * Spinlock (atomic lock cmpxchg with pause — SMP-safe)
+ *
+ * Upgraded from CLI/STI (single-core only) to atomic test-and-set
+ * for SMP correctness. Uses lock cmpxchg with PAUSE in the spin loop
+ * to reduce bus contention on multi-core systems.
  * ================================================================ */
 typedef struct spinlock {
     volatile uint32_t locked;
-    volatile uint32_t saved_flags;
 } spinlock_t;
 
 static inline void spin_lock(spinlock_t *lock) {
-    /* Single-core: save and disable interrupts as a simple lock.
-     * This prevents the PIT/timer interrupt from firing while the
-     * lock is held, which would crash if the IDT is not yet set up.
-     * Multi-core upgrade: replace with atomic test-and-set + pause loop. */
-    (void)lock;
-    uint64_t rflags;
-    asm volatile ("pushfq; popq %0; cli" : "=r"(rflags) :: "memory");
-    lock->saved_flags = (uint32_t)(rflags & 0x200);  /* save IF bit */
-    lock->locked = 1;
-}
-
-static inline void spin_unlock(spinlock_t *lock) {
-    lock->locked = 0;
-    /* Restore previous interrupt state — don't unconditionally sti.
-     * This is critical because during early boot (before irq_init),
-     * interrupts must remain disabled to avoid crashing on garbage IDT. */
-    if (lock->saved_flags) {  /* IF was set */
-        asm volatile ("sti" ::: "memory");
+    while (1) {
+        uint32_t old = 0;
+        uint32_t new = 1;
+        asm volatile (
+            "lock cmpxchgl %2, %1"
+            : "=a"(old), "+m"(lock->locked)
+            : "r"(new), "0"(old)
+            : "memory"
+        );
+        if (old == 0) break;
+        asm volatile ("pause" ::: "memory");
     }
 }
 
-static spinlock_t buddy_lock_ = {0, 0};
-static spinlock_t slab_lock_  = {0, 0};
+static inline void spin_unlock(spinlock_t *lock) {
+    asm volatile ("movl $0, %0" : "=m"(lock->locked) : : "memory");
+}
+
+static spinlock_t buddy_lock_ = {0};
+static spinlock_t slab_lock_  = {0};
 
 #define buddy_lock()   spin_lock(&buddy_lock_)
 #define buddy_unlock() spin_unlock(&buddy_lock_)
@@ -426,6 +428,113 @@ void phys_mem_init(void *mb_info) {
                (int)stat_total_pages);
 }
 
+/*
+ * phys_mem_init_uefi: Initialize physical memory from UEFI memory map.
+ * @bi_raw: pointer to struct uefi_boot_info from the UEFI bootloader.
+ *
+ * Parses the UEFI memory map entries, marks available conventional memory
+ * as free, and marks reserved/ACPI/MMIO/other regions as reserved.
+ */
+void phys_mem_init_uefi(void *bi_raw) {
+    struct uefi_boot_info *bi = (struct uefi_boot_info *)bi_raw;
+
+    /* Initialize page array */
+    memset(page_array, 0, sizeof(page_array));
+    for (uint32_t o = 0; o <= MAX_ORDER; ++o) free_area[o] = NULL;
+
+    uint64_t total_ram = 0;
+    uint64_t highest_available = 0;
+
+    /* First pass: find the highest available memory address */
+    for (uint32_t i = 0; i < bi->mmap_num_entries; i++) {
+        uint64_t end_addr = bi->mmap[i].phys_start +
+                            bi->mmap[i].num_pages * PAGE_SIZE;
+        if (end_addr > highest_available) {
+            highest_available = end_addr;
+        }
+    }
+
+    /* Cap at 256 MiB (matching the existing buddy allocator limit) */
+    if (highest_available > 256ULL * 1024 * 1024) {
+        highest_available = 256ULL * 1024 * 1024;
+    }
+
+    total_ram = highest_available;
+    phys_mem_end = total_ram;
+    total_phys_pages = total_ram / PAGE_SIZE;
+
+    log_printf(LOG_LEVEL_INFO, "phys_mem_uefi: total RAM = %d MiB, %d pages\n",
+               (int)(total_ram / (1024*1024)),
+               (int)total_phys_pages);
+
+    /* Second pass: mark each entry as reserved or available */
+    for (uint32_t i = 0; i < bi->mmap_num_entries; i++) {
+        uint64_t start = bi->mmap[i].phys_start;
+        uint64_t end   = start + bi->mmap[i].num_pages * PAGE_SIZE;
+
+        /* Clamp to our managed range */
+        if (start >= total_ram) continue;
+        if (end > total_ram) end = total_ram;
+
+        uint64_t start_pfn = phys_to_pfn(start);
+        uint64_t end_pfn   = phys_to_pfn(end);
+
+        if (start_pfn >= BUDDY_MAX_PAGES) continue;
+        if (end_pfn > BUDDY_MAX_PAGES) end_pfn = BUDDY_MAX_PAGES;
+
+        uint32_t type = bi->mmap[i].type;
+
+        if (type == UEFI_MMAP_CONVENTIONAL) {
+            /* Available memory: mark as free */
+            /* But reserve kernel and heap regions first */
+            /* (We'll do that after the pass) */
+        } else {
+            /* Reserved, ACPI, MMIO, etc.: mark as reserved */
+            buddy_mark_reserved(start_pfn, end_pfn);
+        }
+    }
+
+    /* Reserve kernel + heap regions BEFORE marking pages available */
+    uint64_t kernel_reserved_pages = (2 * 1024 * 1024) / PAGE_SIZE;
+    buddy_mark_reserved(0, kernel_reserved_pages);
+
+    uint64_t heap_start_pfn = (8 * 1024 * 1024) / PAGE_SIZE;
+    uint64_t heap_end_pfn   = (32 * 1024 * 1024) / PAGE_SIZE;
+    if (heap_end_pfn > total_phys_pages) heap_end_pfn = total_phys_pages;
+    buddy_mark_reserved(heap_start_pfn, heap_end_pfn);
+
+    /* Mark remaining pages as available.
+     * buddy_mark_available skips RESERVED pages, so kernel+heap
+     * pages won't be added to free lists. */
+    buddy_mark_available(kernel_reserved_pages, total_phys_pages);
+
+    /* Also mark conventional memory that was already processed.
+     * Since buddy_mark_available skips reserved pages, we need to
+     * explicitly mark the conventional memory regions as free. */
+    for (uint32_t i = 0; i < bi->mmap_num_entries; i++) {
+        uint64_t start = bi->mmap[i].phys_start;
+        uint64_t end   = start + bi->mmap[i].num_pages * PAGE_SIZE;
+
+        if (start >= total_ram) continue;
+        if (end > total_ram) end = total_ram;
+
+        uint64_t start_pfn = phys_to_pfn(start);
+        uint64_t end_pfn   = phys_to_pfn(end);
+
+        if (start_pfn >= BUDDY_MAX_PAGES) continue;
+        if (end_pfn > BUDDY_MAX_PAGES) end_pfn = BUDDY_MAX_PAGES;
+
+        uint32_t type = bi->mmap[i].type;
+
+        if (type == UEFI_MMAP_CONVENTIONAL) {
+            buddy_mark_available(start_pfn, end_pfn);
+        }
+    }
+
+    log_printf(LOG_LEVEL_INFO, "phys_mem_uefi: buddy system initialized, free pages = %d\n",
+               (int)stat_total_pages);
+}
+
 void *alloc_pages(uint32_t order) {
     if (order > MAX_ORDER) return NULL;
 
@@ -595,6 +704,9 @@ void slab_init(void) {
 void *kmalloc(size_t size) {
     if (size == 0) return NULL;
 
+    /* Performance counter: kmalloc call */
+    perf_inc(PERF_MALLOC_COUNT);
+
     if (size <= PAGE_SIZE) {
         /* Slab allocation */
         int idx = slab_size_to_index(size);
@@ -643,6 +755,9 @@ void *kmalloc(size_t size) {
 
 void kfree(void *ptr) {
     if (!ptr) return;
+
+    /* Performance counter: kfree call */
+    perf_inc(PERF_FREE_COUNT);
 
     uint64_t pa = (uint64_t)(uintptr_t)ptr;
     struct page *pg = get_page_struct(pa);

@@ -9,13 +9,17 @@
  */
 
 #include "sched.h"
+#include "smp.h"
 #include "include/log.h"
 #include "include/assert.h"
 #include "mem.h"
 #include "pagetable.h"
+#include "perf.h"
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
+
+extern int num_cpus;
 
 /* ================================================================
  * External declarations
@@ -28,6 +32,22 @@ extern void context_switch(uint64_t **old_rsp_ptr, uint64_t *new_rsp);
 struct task_struct *current = NULL;
 static struct task_struct *init_task = NULL;  /* pid=1, reaper for orphans */
 static struct task_struct *idle_task  = NULL;  /* pid=0, idle loop */
+
+/* Per-CPU run queues (SMP) */
+struct run_queue per_cpu_rq[MAX_CPUS];
+
+/* Current CPU ID helper (0 = BSP, increments for each AP) */
+static inline int current_cpu_id(void) {
+    /* On SMP, we use GS segment to get cpu_data. On single-core, return 0.
+     * GS is set up during smp_init() for BSP and ap_entry() for APs.
+     * Before SMP init, we return 0 (BSP).
+     * After SMP init, GS base points to &cpu_data[n], and cpu_data[n].cpu_id
+     * is at offset 0, so mov %%gs:0 returns the cpu_id. */
+    int cpu_id = 0;
+    asm volatile ("mov %%gs:0, %0" : "=r"(cpu_id));
+    if (cpu_id < 0 || cpu_id >= MAX_CPUS) cpu_id = 0;
+    return cpu_id;
+}
 
 /* ================================================================
  * PID bitmap allocator — O(1) lookup, O(1) alloc
@@ -136,10 +156,18 @@ void scheduler_init(void) {
      */
     memset(pid_bitmap, 0, sizeof(pid_bitmap));
     memset(pid_table, 0, sizeof(pid_table));
+    memset(per_cpu_rq, 0, sizeof(per_cpu_rq));
     pid_set_bit(0);
     pid_set_bit(1);
 
-    /* Create idle task (pid=0) */
+    /* Initialize per-CPU run queues */
+    for (int i = 0; i < MAX_CPUS; i++) {
+        per_cpu_rq[i].head = NULL;
+        per_cpu_rq[i].count = 0;
+        per_cpu_rq[i].lock = 0;
+    }
+
+    /* Create idle task (pid=0) — placed on CPU 0's run queue */
     current = (struct task_struct *)kmalloc(sizeof(struct task_struct));
     ASSERT(current != NULL);
     memset(current, 0, sizeof(*current));
@@ -149,7 +177,7 @@ void scheduler_init(void) {
     current->state      = TASK_RUNNING;
     current->priority   = 0;          /* lowest priority */
     current->time_slice = 1;
-    current->cpu_mask   = 0x01;
+    current->cpu_mask   = 0xFF;       /* all CPUs */
     current->next       = current;
     current->parent     = NULL;
     current->children   = NULL;
@@ -158,6 +186,10 @@ void scheduler_init(void) {
     fd_table_init(current);
     pid_register(0, current);
     idle_task = current;
+
+    /* Add idle to CPU 0's run queue */
+    per_cpu_rq[0].head = current;
+    per_cpu_rq[0].count = 1;
 
     /* Create init task (pid=1) */
     struct task_struct *init = (struct task_struct *)kmalloc(sizeof(*init));
@@ -284,7 +316,7 @@ struct task_struct *create_task(void (*fn)(void)) {
     t->state       = TASK_READY;
     t->priority    = 128;        /* default medium priority */
     t->time_slice  = 10;         /* 10 ticks = 100ms at 100Hz */
-    t->cpu_mask    = 0x01;       /* CPU 0 only (single-core) */
+    t->cpu_mask    = 0xFF;       /* allow all CPUs */
     t->parent      = current;
     t->children    = NULL;
     t->t_errno     = 0;
@@ -297,11 +329,25 @@ struct task_struct *create_task(void (*fn)(void)) {
 
     fd_table_init(t);
     pid_register(t->pid, t);
-    t->next = current->next;
-    current->next = t;
+
+    /* Choose a CPU for this task (round-robin across CPUs) */
+    int target_cpu = t->pid % num_cpus;
+    if (num_cpus == 0) num_cpus = 1;
+    if (target_cpu >= num_cpus) target_cpu = 0;
+
+    /* Add to the target CPU's run queue */
+    struct run_queue *rq = &per_cpu_rq[target_cpu];
+    if (rq->head == NULL) {
+        t->next = t;
+        rq->head = t;
+    } else {
+        t->next = rq->head->next;
+        rq->head->next = t;
+    }
+    rq->count++;
     add_child(current, t);
 
-    log_printf(LOG_LEVEL_INFO, "Created task pid=%d\n", t->pid);
+    log_printf(LOG_LEVEL_INFO, "Created task pid=%d on CPU %d\n", t->pid, target_cpu);
     return t;
 }
 
@@ -312,16 +358,25 @@ struct task_struct *create_task(void (*fn)(void)) {
 void schedule(void) {
     if (!current || !current->next) return;
 
+    int cpu_id = current_cpu_id();
+    struct run_queue *rq = &per_cpu_rq[cpu_id];
+
+    if (rq->head == NULL) {
+        /* No tasks in this CPU's run queue — halt or try to steal */
+        log_printf(LOG_LEVEL_ERR, "schedule: CPU %d has no tasks, halting\n", cpu_id);
+        for (;;) asm volatile ("cli; hlt");
+    }
+
     struct task_struct *next = current->next;
     int scanned = 0;
-    int limit = MAX_PID;  /* safety: match max PID space */
+    int limit = rq->count + 1;  /* safety limit */
 
     while (next->state != TASK_READY && next->state != TASK_RUNNING) {
         next = next->next;
         scanned++;
         if (next == current || scanned > limit) {
             /*
-             * No runnable task found.
+             * No runnable task found on this CPU.
              * Switch to idle (pid=0) which loops with HLT.
              * idle is always in the ready queue and always READY.
              */
@@ -330,15 +385,13 @@ void schedule(void) {
                 break;
             }
             /* Fallback: if even idle is broken, halt */
-            log_printf(LOG_LEVEL_ERR, "schedule: no runnable tasks, halting\n");
+            log_printf(LOG_LEVEL_ERR, "schedule: CPU %d no runnable tasks, halting\n", cpu_id);
             for (;;) asm volatile ("cli; hlt");
         }
     }
 
     if (next == current) {
-        /* Only one runnable task — keep it running.
-         * Ensure state is TASK_RUNNING since yield() may have
-         * set it to TASK_READY before calling schedule(). */
+        /* Only one runnable task — keep it running. */
         current->state = TASK_RUNNING;
         return;
     }
@@ -348,8 +401,16 @@ void schedule(void) {
     next->state = TASK_RUNNING;
     current = next;
 
+    /* Update per-CPU current task pointer */
+    if (cpu_id >= 0 && cpu_id < MAX_CPUS) {
+        cpu_data[cpu_id].current_task = current;
+    }
+
     uint64_t new_cr3 = current->cr3;
     asm volatile ("mov %0, %%cr3" :: "r"(new_cr3) : "memory");
+
+    /* Performance counter: context switch */
+    perf_inc(PERF_CTX_SWITCHES);
 
     context_switch(&prev->rsp, current->rsp);
 }
@@ -508,4 +569,125 @@ int waitpid(int pid, int *status, int options) {
 
         /* Resumed: re-scan children (the ZOMBIE should now be there) */
     }
+}
+
+/* ================================================================
+ * SMP scheduling functions
+ * ================================================================ */
+
+/*
+ * smp_enqueue_task: Add a task to a specific CPU's run queue.
+ * For use with CPU affinity and cross-CPU task migration.
+ */
+void smp_enqueue_task(struct task_struct *t, int cpu_id) {
+    if (!t || cpu_id < 0 || cpu_id >= MAX_CPUS) return;
+    if (cpu_id >= num_cpus) return;
+
+    struct run_queue *rq = &per_cpu_rq[cpu_id];
+
+    if (rq->head == NULL) {
+        t->next = t;
+        rq->head = t;
+    } else {
+        t->next = rq->head->next;
+        rq->head->next = t;
+    }
+    rq->count++;
+}
+
+/*
+ * smp_dequeue_task: Remove a task from a specific CPU's run queue.
+ * Does NOT free the task — just removes it from the queue.
+ */
+void smp_dequeue_task(struct task_struct *t, int cpu_id) {
+    if (!t || cpu_id < 0 || cpu_id >= MAX_CPUS) return;
+
+    struct run_queue *rq = &per_cpu_rq[cpu_id];
+    if (rq->head == NULL || rq->count == 0) return;
+
+    /* Handle single-task queue */
+    if (rq->head == t && t->next == t) {
+        rq->head = NULL;
+        rq->count = 0;
+        return;
+    }
+
+    /* Find the task before 't' in the circular list */
+    struct task_struct *prev = rq->head;
+    while (prev->next != t) {
+        prev = prev->next;
+        if (prev == rq->head) {
+            /* Task not found in this queue */
+            return;
+        }
+    }
+
+    /* Unlink */
+    prev->next = t->next;
+    if (rq->head == t) {
+        rq->head = t->next;
+    }
+    rq->count--;
+}
+
+/*
+ * smp_schedule: Load-balance tasks across CPUs.
+ *
+ * Called periodically from the timer interrupt (or reschedule IPI).
+ * Migrates tasks from overloaded CPUs to idle ones.
+ *
+ * Strategy: simple work-stealing — if this CPU's queue is empty,
+ * steal a task from the busiest CPU.
+ */
+void smp_schedule(int my_cpu_id) {
+    if (my_cpu_id < 0 || my_cpu_id >= num_cpus) return;
+
+    struct run_queue *my_rq = &per_cpu_rq[my_cpu_id];
+
+    /* If we already have tasks, nothing to do */
+    if (my_rq->count > 1) return;
+
+    /* Find the busiest CPU (excluding self) */
+    int busiest_cpu = -1;
+    int max_count = 0;
+
+    for (int i = 0; i < num_cpus; i++) {
+        if (i == my_cpu_id) continue;
+        struct run_queue *rq = &per_cpu_rq[i];
+        if (rq->count > max_count) {
+            max_count = rq->count;
+            busiest_cpu = i;
+        }
+    }
+
+    /* If no CPU has more than 1 task, nothing to steal */
+    if (busiest_cpu < 0 || max_count <= 1) return;
+
+    struct run_queue *src_rq = &per_cpu_rq[busiest_cpu];
+
+    /* Steal one task from the busiest CPU (not the head) */
+    struct task_struct *stolen = NULL;
+
+    /* Find a TASK_READY task to steal */
+    struct task_struct *candidate = src_rq->head;
+    if (candidate) {
+        struct task_struct *start = candidate;
+        do {
+            if (candidate->state == TASK_READY &&
+                candidate != src_rq->head) {
+                stolen = candidate;
+                break;
+            }
+            candidate = candidate->next;
+        } while (candidate != start);
+    }
+
+    if (!stolen) return;
+
+    /* Remove from source CPU and add to our CPU */
+    smp_dequeue_task(stolen, busiest_cpu);
+    smp_enqueue_task(stolen, my_cpu_id);
+
+    log_printf(LOG_LEVEL_DEBUG, "smp: migrated task pid=%d from CPU %d to CPU %d\n",
+               stolen->pid, busiest_cpu, my_cpu_id);
 }

@@ -34,6 +34,9 @@ typedef enum {
     TASK_DEAD    = 4,  /* fully cleaned up */
 } task_state_t;
 
+/* Task flags */
+#define TASK_SECCOMP  0x100  /* task has seccomp filter installed */
+
 /* Forward declaration for linked list */
 struct task_struct;
 
@@ -81,9 +84,24 @@ struct task_struct {
 
     /* --- Error handling --- */
     int       t_errno;         /* per-task errno (thread-safe) */
+
+    /* --- Security --- */
+    struct seccomp_filter *seccomp;  /* syscall filter (NULL = all allowed) */
 };
 
 #include "signal.h"
+
+/* ============ Per-CPU Run Queue (SMP) ============ */
+
+#ifndef MAX_CPUS
+#define MAX_CPUS 8
+#endif
+
+struct run_queue {
+    struct task_struct *head;  /* circular linked list of ready tasks */
+    int count;                 /* number of tasks in queue */
+    int lock;                  /* simple spin flag (protected by interrupt disable) */
+};
 
 /* ============ Scheduler API ============ */
 
@@ -92,6 +110,24 @@ struct task_struct *create_task(void (*fn)(void));
 void schedule(void);
 void yield(void);
 void check_resched(void);
+
+/*
+ * smp_schedule: Load-balance tasks across CPUs.
+ * Migrates tasks from overloaded CPUs to idle ones.
+ * Called periodically from the timer interrupt or IPI.
+ */
+void smp_schedule(int my_cpu_id);
+
+/*
+ * smp_enqueue_task: Add a task to a specific CPU's run queue.
+ * Used for CPU affinity and cross-CPU task migration.
+ */
+void smp_enqueue_task(struct task_struct *t, int cpu_id);
+
+/*
+ * smp_dequeue_task: Remove a task from a specific CPU's run queue.
+ */
+void smp_dequeue_task(struct task_struct *t, int cpu_id);
 
 /* ============ Process lifecycle ============ */
 
@@ -125,5 +161,6 @@ void fd_close_all(struct task_struct *t);
 /* ============ Globals ============ */
 
 extern struct task_struct *current;
+extern struct run_queue per_cpu_rq[MAX_CPUS];
 
 #endif /* SCHED_H */

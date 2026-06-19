@@ -14,6 +14,8 @@
 #include "pagetable.h"
 #include "mem.h"
 #include "capability.h"
+#include "perf.h"
+#include "seccomp.h"
 #include <stdint.h>
 #include <stddef.h>
 #include <string.h>
@@ -458,6 +460,15 @@ long handle_syscall(int num, uint64_t a1, uint64_t a2, uint64_t a3,
         return -1;
     }
 
+    /* Performance counter: count syscalls */
+    perf_inc(PERF_SYSCALL_COUNT);
+
+    /* Seccomp filter check: deny if blocked by task's filter */
+    if (seccomp_check(current, num) != 0) {
+        current->t_errno = EPERM;
+        return -1;
+    }
+
     long ret = -1;
     switch (num) {
         case SYS_READ:    ret = sys_read((int)a1, (void *)a2, (size_t)a3); break;
@@ -513,7 +524,15 @@ void syscall_trap(struct trapframe *tf) {
         current->is_fork_child = 0;
         tf->rax = 0;
     } else {
+        /* Measure syscall latency via RDTSC */
+        uint32_t tsc_lo_start, tsc_hi_start;
+        asm volatile ("rdtsc" : "=a"(tsc_lo_start), "=d"(tsc_hi_start));
         long ret = handle_syscall(num, a1, a2, a3, a4, a5, a6);
+        uint32_t tsc_lo_end, tsc_hi_end;
+        asm volatile ("rdtsc" : "=a"(tsc_lo_end), "=d"(tsc_hi_end));
+        uint64_t tsc_diff = (((uint64_t)tsc_hi_end << 32) | tsc_lo_end)
+                          - (((uint64_t)tsc_hi_start << 32) | tsc_lo_start);
+        perf_add_latency(PERF_SYSCALL_LATENCY, perf_tsc_to_ns(tsc_diff));
         tf->rax = (uint64_t)ret;
     }
 

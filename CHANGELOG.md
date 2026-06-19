@@ -1,5 +1,67 @@
 # AuroraOS Changelog
 
+## v3.0.0 (2026-06-19) — Comprehensive System Enhancement
+
+### Short-term Improvements
+- **docs**: 修复 README.md 和 CONTRIBUTING.md 中所有 `用户名/AuroraOS` 占位符为实际仓库 `zhan1206/aurora-os`
+- **ci/cd**: QEMU 启动测试增加失败时详细日志输出（串口日志、控制台日志、QMP 截图）
+- **contributing**: 新增新手入门章节，包含 6 个 beginner-friendly 任务标签和详细参与流程
+
+### Medium-term Improvements — UEFI Boot
+- **boot**: 新增 UEFI 引导加载器 `boot/efi_main.c` + `boot/uefi.h`
+- **boot**: 支持从 UEFI GOP 获取帧缓冲信息，传递内存映射给内核
+- **console**: 新增帧缓冲控制台支持（`console_fb_init`），支持动态分辨率
+- **kernel**: `main.c` 增加 UEFI 启动检测，自动选择 VGA 或帧缓冲控制台
+- **build**: 新增 `make uefi` 目标，`make iso` 生成 BIOS+UEFI 混合启动 ISO
+
+### Medium-term Improvements — SMP Multi-Core
+- **smp**: 新增 `kernel/smp.c/h` — SMP 初始化、AP 启动跳板代码、per-CPU 结构
+- **apic**: 新增 `kernel/apic.c/h` — LAPIC/IOAPIC 初始化、IPI 发送、定时器校准
+- **sched**: 升级为 per-CPU 就绪队列（`per_cpu_rq[MAX_CPUS]`），支持工作窃取负载均衡
+- **mem**: 自旋锁从 CLI/STI 升级为原子 `lock cmpxchg` + `pause` 循环
+- **irq**: 新增 IPI 中断处理（reschedule 0xFE、TLB shootdown 0xFD），禁用 PIC 启用 IOAPIC
+
+### Medium-term Improvements — Ext2 Filesystem
+- **ext2**: 新增 `kernel/ext2.c/h` — 完整 ext2 文件系统实现（~1000 行）
+- **ext2**: 支持超级块读取、inode 操作、目录遍历、文件读写（直接块+单级间接块）
+- **block_dev**: 新增 `kernel/block_dev.c/h` — 块设备抽象层（注册/查找/读写）
+- **ramdisk**: 新增 `kernel/ramdisk.c` — 16MB 内存虚拟磁盘用于 ext2 测试
+- **fs**: 启动时优先挂载 ext2，失败则回退到 ramfs
+
+### Medium-term Improvements — Device Drivers
+- **pci**: 新增 `kernel/pci.c/h` — PCI 总线枚举、配置空间访问、设备发现
+- **virtio**: 新增 `kernel/virtio_blk.c` — VirtIO 块设备驱动（PCI 传输层 + virtqueue 管理）
+- **virtio**: 新增 `kernel/virtio_net.c` — VirtIO 网络设备驱动
+- **netdev**: 新增 `kernel/netdev.c/h` — 网络设备抽象层
+
+### Long-term Improvements — Security
+- **aslr**: 新增 `kernel/aslr.c/h` — 地址空间布局随机化（xorshift64 PRNG，栈/mmap 随机化）
+- **stack_protect**: 新增 `kernel/stack_protect.c/h` — 栈金丝雀保护（`-fstack-protector-strong`）
+- **seccomp**: 新增 `kernel/seccomp.c/h` — 系统调用访问控制（256 位位图过滤器）
+- **syscall**: 在 `handle_syscall` 中集成 seccomp 检查，拒绝时返回 -EPERM
+
+### Long-term Improvements — Performance Analysis
+- **perf**: 新增 `kernel/perf.c/h` — 8 类性能计数器（上下文切换、系统调用、缺页、COW、内存分配等）
+- **perf**: TSC 频率校准（PIT 辅助），支持延迟统计（min/max/avg）
+- **sysctl**: 新增 `kernel/sysctl.c/h` — 12 项内置统计项（/proc-like 接口）
+- **shell**: 新增 `perf` 命令显示性能统计，`perf reset` 重置计数器
+- **integration**: 性能计数器已集成到调度器、系统调用、缺页处理、内存分配、中断处理
+
+### Long-term Improvements — Module Loader
+- **module**: 新增 `kernel/module.c/h` — 动态模块加载器（~640 行）
+- **module**: 支持 ELF 可重定位文件加载、符号解析、x86_64 重定位（5 种类型）
+- **module**: 预注册 20+ 内核符号（kmalloc, vfs_open, memcpy 等）
+- **elf**: 扩展 `kernel/elf.h` 增加 Elf64_Sym/Elf64_Rela/Elf64_Shdr 结构体
+- **mod_sample**: 新增 `userspace/mod_sample.c` 示例内核模块
+- **shell**: 新增 `mod list/load/unload` 命令
+- **build**: 新增 `make modules` 目标
+
+### Build System
+- **makefile**: 添加 `-mgeneral-regs-only` 标志，添加 `-fstack-protector-strong`
+- **makefile**: 新增 `make uefi`、`make modules` 目标
+
+---
+
 ## v2.5.1 (2026-06-19) — Code Robustness & Error Handling Enhancement
 
 ### Bug Fixes
