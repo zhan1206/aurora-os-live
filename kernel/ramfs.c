@@ -125,6 +125,18 @@ struct super_block *ramfs_create(void) {
 
 int ramfs_add_file(const char *name, const char *content) {
     if (!ramfs_root) return -1;
+    if (!name || !content) return -1;
+
+    /* Check for duplicate file names */
+    struct ramfs_node *existing = ramfs_root->next;
+    while (existing) {
+        if (existing->inode.name && strcmp(existing->inode.name, name) == 0) {
+            log_printf(LOG_LEVEL_WARN, "ramfs: duplicate file '%s' ignored\n", name);
+            return -1;
+        }
+        existing = existing->next;
+    }
+
     struct ramfs_node *n = (struct ramfs_node *)kmalloc(sizeof(*n));
     if (!n) return -1;
     memset(n, 0, sizeof(*n));
@@ -151,6 +163,18 @@ int ramfs_add_file(const char *name, const char *content) {
 
 int ramfs_add_file_data(const char *name, const void *data, size_t size) {
     if (!ramfs_root) return -1;
+    if (!name || !data) return -1;
+
+    /* Check for duplicate file names */
+    struct ramfs_node *existing = ramfs_root->next;
+    while (existing) {
+        if (existing->inode.name && strcmp(existing->inode.name, name) == 0) {
+            log_printf(LOG_LEVEL_WARN, "ramfs: duplicate file '%s' ignored\n", name);
+            return -1;
+        }
+        existing = existing->next;
+    }
+
     struct ramfs_node *n = (struct ramfs_node *)kmalloc(sizeof(*n));
     if (!n) return -1;
     memset(n, 0, sizeof(*n));

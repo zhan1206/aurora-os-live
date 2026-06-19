@@ -333,6 +333,38 @@ int map_range(uint64_t pml4_phys, uint64_t vaddr, uint64_t paddr, uint64_t size,
     return 0;
 }
 
+/*
+ * unmap_page: Remove a single page mapping without freeing the physical page.
+ * Walks the 4-level page table and clears the PTE. Does NOT free intermediate
+ * tables (PDPT/PD/PT) — those are cleaned up by free_pagetable().
+ * Returns silently if the page was not mapped.
+ */
+void unmap_page(uint64_t pml4_phys, uint64_t vaddr) {
+    uint64_t pml4_idx = (vaddr >> 39) & 0x1FF;
+    uint64_t pdpt_idx = (vaddr >> 30) & 0x1FF;
+    uint64_t pd_idx   = (vaddr >> 21) & 0x1FF;
+    uint64_t pt_idx   = (vaddr >> 12) & 0x1FF;
+
+    uint64_t *pml4 = phys_to_virt(pml4_phys);
+    if (!(pml4[pml4_idx] & PTE_PRESENT)) return;
+
+    uint64_t *pdpt = phys_to_virt(pml4[pml4_idx] & PTE_ADDR_MASK);
+    if (!(pdpt[pdpt_idx] & PTE_PRESENT)) return;
+
+    uint64_t *pd = phys_to_virt(pdpt[pdpt_idx] & PTE_ADDR_MASK);
+    if (!(pd[pd_idx] & PTE_PRESENT)) return;
+
+    /* Skip 2MB huge pages — unmap_page only handles 4KB pages */
+    if (pd[pd_idx] & PTE_PS) return;
+
+    uint64_t *pt = phys_to_virt(pd[pd_idx] & PTE_ADDR_MASK);
+    if (!(pt[pt_idx] & PTE_PRESENT)) return;
+
+    /* Clear the PTE and flush TLB */
+    pt[pt_idx] = 0;
+    invlpg(vaddr);
+}
+
 /* ================================================================
  * COW-aware clone: deep-copy user page tables
  *

@@ -102,7 +102,9 @@ static long sys_write(int fd, const void *buf, size_t count) {
 static long sys_open(const char *path, int flags) {
     if (!path) { current->t_errno = EFAULT; return -1; }
     char kpath[256];
-    if (strncpy_from_user(kpath, path, sizeof(kpath)) < 0) { current->t_errno = EFAULT; return -1; }
+    int len = strncpy_from_user(kpath, path, sizeof(kpath) - 1);
+    if (len < 0) { current->t_errno = EFAULT; return -1; }
+    kpath[len] = '\0';  /* ensure null termination */
 
     struct file *filp = vfs_open(kpath, flags);
     if (!filp) { current->t_errno = ENOENT; return -1; }
@@ -221,6 +223,10 @@ static long sys_fstat(int fd, struct kstat *statbuf) {
  * Allocates physical pages and maps them into the process address space
  * starting at a fixed region (0x60000000). Each page is zero-initialized.
  *
+ * LIMITATION: Uses a fixed mapping region at 0x60000000. Consecutive
+ * mmap calls will overwrite previous mappings. A proper implementation
+ * would track allocated regions and find free address space.
+ *
  * PROT flags: PROT_READ=1, PROT_WRITE=2, PROT_EXEC=4
  * MAP_ANONYMOUS=0x20 (only anonymous mapping is supported in this phase)
  * ================================================================ */
@@ -312,7 +318,9 @@ static long sys_execve(const char *path, char *const argv[], char *const envp[])
     (void)argv; (void)envp;
     if (!path) { current->t_errno = EFAULT; return -1; }
     char kpath[256];
-    if (strncpy_from_user(kpath, path, sizeof(kpath)) < 0) { current->t_errno = EFAULT; return -1; }
+    int len = strncpy_from_user(kpath, path, sizeof(kpath) - 1);
+    if (len < 0) { current->t_errno = EFAULT; return -1; }
+    kpath[len] = '\0';
     int ret = exec_elf(kpath);
     if (ret < 0) current->t_errno = ENOENT;
     return ret;

@@ -58,6 +58,9 @@ int map_page(uint64_t pml4_phys, uint64_t vaddr, uint64_t paddr, uint64_t flags)
 /* Convenience: map a user-accessible page. */
 int map_user_page(uint64_t pml4_phys, uint64_t vaddr, uint64_t paddr, uint64_t flags);
 
+/* Unmap a single page without freeing the physical page. */
+void unmap_page(uint64_t pml4_phys, uint64_t vaddr);
+
 /* Map a contiguous range. */
 int map_range(uint64_t pml4_phys, uint64_t vaddr, uint64_t paddr, uint64_t size, uint64_t flags);
 

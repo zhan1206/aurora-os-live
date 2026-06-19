@@ -36,8 +36,18 @@
  * For backward compatibility, we reinterpret the uintptr_t as
  * storing a pointer to cap_entry (allocated via kmalloc).
  *
+ * WARNING: cap_fd_* and fd_* (file.c) share the same fd_table but use
+ * different pointer types. fd_alloc stores raw file* pointers, while
+ * cap_fd_alloc stores cap_entry* wrappers. The two systems are NOT
+ * interoperable — mixing them will cause vfs_close to be called on
+ * a cap_entry* pointer, leading to memory corruption.
+ *
+ * Currently, only fd_* (file.c) is used by the syscall path.
+ * cap_fd_* is reserved for future capability-based security model.
+ *
  * Upgrade path: change fd_table to struct cap_entry fd_table[MAX_FDS]
- * when all callers are migrated.
+ * when all callers are migrated. The cap_entry struct would embed the
+ * file pointer and capability flags inline without separate allocation.
  */
 
 /* ================================================================

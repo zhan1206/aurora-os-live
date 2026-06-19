@@ -23,6 +23,7 @@ struct signal_state *signal_alloc(void) {
  * ================================================================ */
 int do_sys_kill(int pid, int sig) {
     if (sig < 1 || sig >= NSIG) return -1;
+    if (pid < 0) return -1;
 
     struct task_struct *target = find_task_by_pid(pid);
     if (!target) return -1;

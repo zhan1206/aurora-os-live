@@ -19,7 +19,6 @@ int create_user_task_from_entry(void (*entry)(void), uint64_t pml4_phys) {
     void *p1 = alloc_page();
     void *p2 = alloc_page();
     if (!p1 || !p2) {
-        /* Free whichever page(s) succeeded */
         if (p1) free_page(p1);
         if (p2) free_page(p2);
         return -1;
@@ -37,7 +36,9 @@ int create_user_task_from_entry(void (*entry)(void), uint64_t pml4_phys) {
         return -1;
     }
     if (map_user_page(pml4_phys, stack_base_v + 4096, phys_p2, PTE_RW) != 0) {
-        /* Unmap the first page before freeing (optional but clean) */
+        /* Unmap p1 before freeing, to avoid dangling page table entry */
+        extern void unmap_page(uint64_t pml4_phys, uint64_t vaddr);
+        unmap_page(pml4_phys, stack_base_v);
         free_page(p1); free_page(p2);
         return -1;
     }

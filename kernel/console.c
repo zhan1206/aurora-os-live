@@ -102,10 +102,18 @@ void console_clear(void) {
 }
 
 void console_clear_to_end(void) {
+    uint16_t fill = (uint16_t)' ' | ((uint16_t)current_attr << 8);
     int r = cursor_row, c = cursor_col;
-    for (; r < ROWS; ++r, c = 0)
-        for (; c < COLS; ++c)
-            put_cell_raw(r, c, ' ', current_attr);
+
+    /* Clear rest of current row */
+    for (; c < COLS; ++c)
+        put_cell_raw(r, c, ' ', current_attr);
+
+    /* Bulk-fill remaining rows */
+    for (r = cursor_row + 1; r < ROWS; ++r) {
+        for (c = 0; c < COLS; ++c)
+            VGA_BUF[r * COLS + c] = fill;
+    }
 }
 
 void console_set_fg(uint8_t color) {

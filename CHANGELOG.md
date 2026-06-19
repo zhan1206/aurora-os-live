@@ -1,5 +1,29 @@
 # AuroraOS Changelog
 
+## v2.5.1 (2026-06-19) — Code Robustness & Error Handling Enhancement
+
+### Bug Fixes
+- **ramfs**: 为 `ramfs_add_file` 和 `ramfs_add_file_data` 添加 `name` 参数 NULL 检查
+- **ramfs**: 添加重复文件名检测，防止同一文件被多次创建导致查找歧义
+- **syscall**: 修复 `sys_open` 和 `sys_execve` 中 `kpath` 缓冲区可能未空终止的问题
+- **user**: 修复 `create_user_task_from_entry` 部分映射失败时残留的页表映射（dangling PTE）
+- **signal**: 为 `do_sys_kill` 添加 `pid < 0` 边界检查
+
+### New Features
+- **pagetable**: 新增 `unmap_page()` 函数，支持安全地解除单个页面的映射而不释放物理页
+
+### Documentation
+- **capability**: 添加关于 `cap_fd_*` 和 `fd_*` 两套 fd 系统共存风险的重要警告文档
+- **syscall**: 为 `mmap` 固定映射区域限制添加文档说明
+
+### Performance
+- **console**: 优化 `console_clear_to_end` 使用批量 VGA 操作替代逐字符写入
+
+### Build
+- Release 和 Debug 构建均通过，零警告零错误
+
+---
+
 ## v2.5.0 (2026-06-19) — Build Cleanliness & Robustness Audit
 
 ### Build System
