@@ -339,9 +339,13 @@ int map_user_page(uint64_t pml4_phys, uint64_t vaddr, uint64_t paddr, uint64_t f
 
 int map_range(uint64_t pml4_phys, uint64_t vaddr, uint64_t paddr, uint64_t size, uint64_t flags) {
     uint64_t off = 0;
+    /* Prevent infinite loop on overflow: ensure off + PAGE_SIZE doesn't wrap */
+    if (size > UINT64_MAX - PAGE_SIZE + 1) size = UINT64_MAX - PAGE_SIZE + 1;
     while (off < size) {
         int r = map_page(pml4_phys, vaddr + off, paddr + off, flags);
         if (r) return -1;
+        /* Check for overflow before incrementing */
+        if (off + PAGE_SIZE < off) break;
         off += PAGE_SIZE;
     }
     return 0;

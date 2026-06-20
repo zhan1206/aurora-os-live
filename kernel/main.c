@@ -7,6 +7,7 @@
 #include "include/print.h"
 #include "include/kstdio.h"
 #include "include/theme.h"
+#include "include/version.h"
 #include "layout.h"
 #include "mem.h"
 #include "sched.h"
@@ -36,8 +37,6 @@ int g_theme_mode      = THEME_DARK;
 int g_reduced_motion  = 0;
 int g_anim_enabled    = 1;
 
-#define AURORA_VERSION  "AuroraOS v3.2.0"
-#define AURORA_BUILD    "2026-06-20 12:00"
 #define AURORA_COPY     "(c) 2026 AuroraOS Contributors — MIT License"
 
 /* ================================================================
@@ -85,12 +84,12 @@ static void boot_print_logo(void) {
 
     /* Version / Build info in a compact box */
     console_write_ansi(BOOT_VERSION_COLOR);
-    console_write_centered(AURORA_VERSION);
+    console_write_centered(AURORAOS_VERSION);
     console_write_ansi(SGR_RESET);
     console_putc('\n');
 
     console_write_ansi(BOOT_BUILD_COLOR);
-    console_write_centered(AURORA_BUILD);
+    console_write_centered(AURORAOS_FULL_VERSION);
     console_write_ansi(SGR_RESET);
     console_putc('\n');
 
@@ -167,7 +166,9 @@ void kernel_main(uint32_t magic, void *mb_info) {
         printk(logo[i]);
         printk("\n");
     }
-    printk(AURORA_VERSION);
+    printk(AURORAOS_VERSION);
+    printk("\n");
+    printk(AURORAOS_FULL_VERSION);
     printk("\n\n");
 
     console_show_cursor();

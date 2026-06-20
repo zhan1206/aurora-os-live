@@ -1403,10 +1403,17 @@ static void do_cp_cmd(const char *args) {
         return;
     }
 
+    /* Copy source path to a null-terminated buffer (src is not null-terminated
+     * because it points into the middle of the original command line) */
+    char src_buf[256];
+    size_t copy_len = src_len < sizeof(src_buf) - 1 ? src_len : sizeof(src_buf) - 1;
+    memcpy(src_buf, src, copy_len);
+    src_buf[copy_len] = '\0';
+
     /* Read source file */
-    struct file *fsrc = vfs_open(src, 0);
+    struct file *fsrc = vfs_open(src_buf, 0);
     if (!fsrc) {
-        console_error_with_hint("cp: source not found", src);
+        console_error_with_hint("cp: source not found", src_buf);
         return;
     }
     char buf[4096];
@@ -1547,13 +1554,23 @@ static int  g_env_count = 0;
 static void env_set(const char *key, const char *val) {
     for (int i = 0; i < g_env_count; i++) {
         if (strcmp(g_env_keys[i], key) == 0) {
-            strcpy(g_env_vals[i], val);
+            /* Safe copy with bounds: val fits in g_env_vals[i] */
+            size_t j;
+            for (j = 0; j < sizeof(g_env_vals[i]) - 1 && val[j]; j++)
+                g_env_vals[i][j] = val[j];
+            g_env_vals[i][j] = '\0';
             return;
         }
     }
     if (g_env_count < ENV_MAX) {
-        strcpy(g_env_keys[g_env_count], key);
-        strcpy(g_env_vals[g_env_count], val);
+        /* Safe copy with bounds: key fits in g_env_keys[g_env_count] */
+        size_t j;
+        for (j = 0; j < sizeof(g_env_keys[g_env_count]) - 1 && key[j]; j++)
+            g_env_keys[g_env_count][j] = key[j];
+        g_env_keys[g_env_count][j] = '\0';
+        for (j = 0; j < sizeof(g_env_vals[g_env_count]) - 1 && val[j]; j++)
+            g_env_vals[g_env_count][j] = val[j];
+        g_env_vals[g_env_count][j] = '\0';
         g_env_count++;
     }
 }
@@ -2338,6 +2355,8 @@ static int run_pipeline(const char *line) {
                     if (fd >= 0) {
                         fd_dup2(current, fd, 1);
                         fd_close(current, fd);
+                    } else {
+                        vfs_close(f);
                     }
                 }
             }

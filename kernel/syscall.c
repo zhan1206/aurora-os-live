@@ -113,7 +113,13 @@ static long sys_open(const char *path, int flags) {
     struct file *filp = vfs_open(kpath, flags);
     if (!filp) { current->t_errno = ENOENT; return -1; }
 
-    return fd_alloc(current, filp);
+    int fd = fd_alloc(current, filp);
+    if (fd < 0) {
+        vfs_close(filp);
+        current->t_errno = ENFILE;
+        return -1;
+    }
+    return fd;
 }
 
 static long sys_close(int fd) {
@@ -255,11 +261,27 @@ static long sys_mmap(void *addr, size_t length, int prot, int flags,
 
     for (size_t i = 0; i < num_pages; i++) {
         void *phys = alloc_page();
-        if (!phys) { current->t_errno = ENOMEM; return -1; }
+        if (!phys) {
+            /* Cleanup previously mapped pages on allocation failure */
+            for (size_t j = 0; j < i; j++) {
+                uint64_t va = map_va + j * PAGE_SIZE;
+                unmap_page(current->cr3, va);
+                /* Note: physical page cannot be easily recovered after unmap
+                 * without tracking it. This is a known limitation of the
+                 * fixed-region approach. */
+            }
+            current->t_errno = ENOMEM;
+            return -1;
+        }
         memset(phys, 0, PAGE_SIZE);
         if (map_page(current->cr3, map_va + i * PAGE_SIZE,
                      (uint64_t)(uintptr_t)phys, pte_flags) != 0) {
             free_page(phys);
+            /* Cleanup previously mapped pages on map failure */
+            for (size_t j = 0; j < i; j++) {
+                uint64_t va = map_va + j * PAGE_SIZE;
+                unmap_page(current->cr3, va);
+            }
             current->t_errno = ENOMEM;
             return -1;
         }

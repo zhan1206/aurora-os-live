@@ -232,7 +232,11 @@ int module_load(const char *path) {
     char *shstrtab = (char *)kmalloc(shstrtab_hdr->sh_size);
     if (!shstrtab) { kfree(shdrs); vfs_close(f); return -1; }
     f->offset = shstrtab_hdr->sh_offset;
-    vfs_read(f, shstrtab, shstrtab_hdr->sh_size);
+    if (vfs_read(f, shstrtab, shstrtab_hdr->sh_size) != (ssize_t)shstrtab_hdr->sh_size) {
+        log_printf(LOG_LEVEL_WARN, "module_load: read shstrtab failed\n");
+        /* Continue with empty string table - section names will be unavailable */
+        memset(shstrtab, 0, shstrtab_hdr->sh_size);
+    }
 
     /* --- First pass: collect allocatable sections and compute total size --- */
     #define MAX_SECTIONS 64
@@ -298,7 +302,11 @@ int module_load(const char *path) {
         } else {
             /* Copy from file */
             f->offset = secs[i].file_offset;
-            vfs_read(f, (void *)(uintptr_t)secs[i].addr, secs[i].size);
+            ssize_t rd = vfs_read(f, (void *)(uintptr_t)secs[i].addr, secs[i].size);
+            if (rd != (ssize_t)secs[i].size) {
+                log_printf(LOG_LEVEL_WARN, "module_load: read section %d failed (got %d/%llu)\n",
+                           i, (int)rd, (unsigned long long)secs[i].size);
+            }
         }
         current_offset += secs[i].size;
     }
@@ -309,7 +317,10 @@ int module_load(const char *path) {
         strtab_data = (char *)kmalloc(strtab_hdr->sh_size);
         if (strtab_data) {
             f->offset = strtab_hdr->sh_offset;
-            vfs_read(f, strtab_data, strtab_hdr->sh_size);
+            if (vfs_read(f, strtab_data, strtab_hdr->sh_size) != (ssize_t)strtab_hdr->sh_size) {
+                log_printf(LOG_LEVEL_WARN, "module_load: read strtab failed\n");
+                memset(strtab_data, 0, strtab_hdr->sh_size);
+            }
         }
     }
 
@@ -319,7 +330,10 @@ int module_load(const char *path) {
         symtab_data = (Elf64_Sym *)kmalloc(symtab_hdr->sh_size);
         if (symtab_data) {
             f->offset = symtab_hdr->sh_offset;
-            vfs_read(f, symtab_data, symtab_hdr->sh_size);
+            if (vfs_read(f, symtab_data, symtab_hdr->sh_size) != (ssize_t)symtab_hdr->sh_size) {
+                log_printf(LOG_LEVEL_WARN, "module_load: read symtab failed\n");
+                memset(symtab_data, 0, symtab_hdr->sh_size);
+            }
             symtab_count = symtab_hdr->sh_size / sizeof(Elf64_Sym);
         }
     }
@@ -348,12 +362,22 @@ int module_load(const char *path) {
             }
         }
 
+        /* Skip relocation if target section not found (avoid wild writes to address 0) */
+        if (target_base == 0) {
+            log_printf(LOG_LEVEL_WARN, "module_load: RELA target section %u not found, skipping\n", target_sec);
+            continue;
+        }
+
         /* Read RELA entries */
         uint64_t rela_count = shdrs[i].sh_size / sizeof(Elf64_Rela);
         Elf64_Rela *relas = (Elf64_Rela *)kmalloc(shdrs[i].sh_size);
         if (!relas) continue;
         f->offset = shdrs[i].sh_offset;
-        vfs_read(f, relas, shdrs[i].sh_size);
+        if (vfs_read(f, relas, shdrs[i].sh_size) != (ssize_t)shdrs[i].sh_size) {
+            log_printf(LOG_LEVEL_WARN, "module_load: read RELA section %d failed\n", i);
+            kfree(relas);
+            continue;
+        }
 
         for (uint64_t r = 0; r < rela_count; r++) {
             uint64_t r_offset = relas[r].r_offset;

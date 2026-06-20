@@ -81,7 +81,7 @@ static int write_jsb(void) {
     jsb->jsb_tail         = g_journal.tail;
     jsb->jsb_sequence     = g_journal.sequence;
     jsb->jsb_flags        = g_journal.dirty ? 1 : 0;
-    jsb->jsb_checksum     = calc_checksum(jsb, sizeof(struct journal_superblock) - sizeof(uint32_t) * 8 - sizeof(uint32_t));
+    jsb->jsb_checksum     = calc_checksum(jsb, offsetof(struct journal_superblock, jsb_checksum));
 
     int ret = journal_write_block(0, io_buf);
     kfree(io_buf);
@@ -130,7 +130,12 @@ static void advance_head(uint64_t n) {
     }
     if (g_journal.head >= g_journal.journal_blocks) {
         g_journal.head -= g_journal.journal_blocks;
-        g_journal.tail -= g_journal.journal_blocks;
+        /* Only decrement tail if it won't underflow */
+        if (g_journal.tail >= g_journal.journal_blocks) {
+            g_journal.tail -= g_journal.journal_blocks;
+        } else {
+            g_journal.tail = 0;
+        }
     }
     write_jsb();
 }
@@ -377,7 +382,7 @@ int journal_recover(void) {
 
         /* Valid committed transaction — replay it */
         log_printf(LOG_LEVEL_INFO, "journal: replaying transaction %llu (%u blocks)\n",
-                   (unsigned long long)hdr.jbh_sequence, hdr.jbh_num_blocks);
+                   (unsigned long long)hdr->jbh_sequence, hdr->jbh_num_blocks);
 
         /* Read the descriptor block again to get the full block descriptor area */
         if (journal_read_block(pos, block_buf) < 0) break;
@@ -387,7 +392,7 @@ int journal_recover(void) {
 
         uint32_t sectors_per_block = block_size / g_journal.bdev->block_size;
 
-        for (uint32_t i = 0; i < hdr.jbh_num_blocks; i++) {
+        for (uint32_t i = 0; i < hdr->jbh_num_blocks; i++) {
             /* Read the data block from the journal */
             uint8_t *data_buf = (uint8_t *)kmalloc(block_size);
             if (!data_buf) continue;

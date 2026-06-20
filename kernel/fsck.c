@@ -160,6 +160,8 @@ static int check_group_descriptors(struct block_device *bdev,
     uint32_t gd_per_block = block_size / 32;
     uint32_t gd_blocks = (num_groups + gd_per_block - 1) / gd_per_block;
 
+    /* Prevent integer overflow: gd_blocks * block_size must fit in size_t */
+    if (gd_blocks > SIZE_MAX / block_size) return -1;
     uint8_t *gd_buf = (uint8_t *)kmalloc(gd_blocks * block_size);
     if (!gd_buf) return -1;
 
@@ -222,6 +224,7 @@ static int check_bitmaps(struct block_device *bdev,
     uint32_t gd_per_block = block_size / 32;
     uint32_t gd_blocks = (num_groups + gd_per_block - 1) / gd_per_block;
 
+    if (gd_blocks > SIZE_MAX / block_size) return -1;
     uint8_t *gd_buf = (uint8_t *)kmalloc(gd_blocks * block_size);
     uint8_t *bitmap_buf = (uint8_t *)kmalloc(block_size);
     if (!gd_buf || !bitmap_buf) {
@@ -362,6 +365,11 @@ static int check_directory(struct block_device *bdev,
                 }
             }
 
+            /* Prevent integer overflow when advancing offsets */
+            if (de->rec_len == 0 || block_off + de->rec_len < block_off ||
+                off + de->rec_len < off) {
+                break;
+            }
             block_off += de->rec_len;
             off += de->rec_len;
         }

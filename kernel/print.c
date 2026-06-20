@@ -25,9 +25,16 @@ static int serial_is_transmit_empty(void) {
     return inb(0x3F8 + 5) & 0x20;
 }
 
+/* Serial putc with timeout to prevent infinite hang on hardware failure */
+#define SERIAL_TIMEOUT 100000
 static void serial_putc(char c) {
-    while (!serial_is_transmit_empty());
-    outb(0x3F8, (uint8_t)c);
+    int timeout = SERIAL_TIMEOUT;
+    while (!serial_is_transmit_empty() && --timeout > 0) {
+        asm volatile ("pause" ::: "memory");
+    }
+    if (timeout > 0) {
+        outb(0x3F8, (uint8_t)c);
+    }
 }
 
 /* Flag: set to 1 after console_init() is called */

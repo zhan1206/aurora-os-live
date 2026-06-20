@@ -125,16 +125,19 @@ void virtq_init(struct virtq *vq, uint32_t queue_size) {
     /* Allocate descriptor table */
     size_t desc_size = sizeof(struct virtq_desc) * queue_size;
     vq->desc = (struct virtq_desc *)kmalloc(desc_size);
+    if (!vq->desc) return;
     memset(vq->desc, 0, desc_size);
 
     /* Allocate available ring */
     size_t avail_size = sizeof(struct virtq_avail);
     vq->avail = (struct virtq_avail *)kmalloc(avail_size);
+    if (!vq->avail) { kfree(vq->desc); vq->desc = NULL; return; }
     memset(vq->avail, 0, avail_size);
 
     /* Allocate used ring */
     size_t used_size = sizeof(struct virtq_used);
     vq->used = (struct virtq_used *)kmalloc(used_size);
+    if (!vq->used) { kfree(vq->desc); kfree(vq->avail); vq->desc = NULL; vq->avail = NULL; return; }
     memset(vq->used, 0, used_size);
 
     /* Initialize free descriptor chain */
