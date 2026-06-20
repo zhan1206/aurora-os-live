@@ -1,6 +1,6 @@
 /*
  * mem.c - Buddy system physical page allocator + slab kernel heap
- * Author: refactored based on OS analysis report
+ * Author: AuroraOS Team (self-developed from scratch)
  * Date: 2026-06-12
  *
  * Design:
