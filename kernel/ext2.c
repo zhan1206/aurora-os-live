@@ -169,7 +169,7 @@ static int ext2_write_inode_raw(struct ext2_sb_info *sbi, uint32_t inum,
 
 /*
  * Read a data block from the filesystem.
- * Handles direct blocks and single indirect blocks.
+ * Handles direct blocks, single indirect, and double indirect blocks.
  * @sbi: filesystem private data
  * @raw: the inode to read from
  * @logical_block: zero-based logical block index within the file
@@ -210,17 +210,67 @@ static int ext2_read_data_block(struct ext2_sb_info *sbi,
         return read_block(sbi->bdev, block_size, blk, buf);
     }
 
-    /* Double/triple indirect not supported */
+    /* Double indirect */
+    logical_block -= ptrs_per_block;
+    if (logical_block < ptrs_per_block * ptrs_per_block) {
+        uint32_t dind_blk = raw->i_block[EXT2_DIND_BLOCK];
+        if (dind_blk == 0) return -EIO;
+
+        /* Read the double-indirect block (array of single-indirect pointers) */
+        uint32_t *dind_buf = (uint32_t *)kmalloc(block_size);
+        if (!dind_buf) return -ENOMEM;
+
+        if (read_block(sbi->bdev, block_size, dind_blk, dind_buf) < 0) {
+            kfree(dind_buf);
+            return -EIO;
+        }
+
+        /* Index into the double-indirect array */
+        uint32_t dind_idx = logical_block / ptrs_per_block;
+        uint32_t ind_idx  = logical_block % ptrs_per_block;
+
+        uint32_t ind_blk = dind_buf[dind_idx];
+        if (ind_blk == 0) {
+            kfree(dind_buf);
+            return -EIO;
+        }
+
+        /* Read the single-indirect block */
+        uint32_t *ind_buf = (uint32_t *)kmalloc(block_size);
+        if (!ind_buf) {
+            kfree(dind_buf);
+            return -ENOMEM;
+        }
+
+        int ret = read_block(sbi->bdev, block_size, ind_blk, ind_buf);
+        kfree(dind_buf);
+
+        if (ret < 0) {
+            kfree(ind_buf);
+            return -EIO;
+        }
+
+        uint32_t blk = ind_buf[ind_idx];
+        kfree(ind_buf);
+
+        if (blk == 0) return -EIO;
+        return read_block(sbi->bdev, block_size, blk, buf);
+    }
+
+    /* Triple indirect not supported (files > ~4GB are rare for this OS) */
     return -ENOSYS;
 }
 
 /*
- * Write a data block to the filesystem (direct blocks only).
+ * Write a data block to the filesystem.
+ * Handles direct blocks and single indirect blocks.
+ * Double indirect write is not yet supported (requires block allocation).
  */
 static int ext2_write_data_block(struct ext2_sb_info *sbi,
                                  struct ext2_inode *raw,
                                  uint32_t logical_block, const void *buf) {
     uint32_t block_size = sbi->block_size;
+    uint32_t ptrs_per_block = block_size / 4;
 
     if (logical_block < EXT2_NDIR_BLOCKS) {
         uint32_t blk = raw->i_block[logical_block];
@@ -228,7 +278,32 @@ static int ext2_write_data_block(struct ext2_sb_info *sbi,
         return write_block(sbi->bdev, block_size, blk, buf);
     }
 
-    /* Indirect blocks not supported for write */
+    /* Single indirect write */
+    logical_block -= EXT2_NDIR_BLOCKS;
+    if (logical_block < ptrs_per_block) {
+        uint32_t ind_blk = raw->i_block[EXT2_IND_BLOCK];
+        if (ind_blk == 0) return -EIO;
+
+        uint32_t *ind_buf = (uint32_t *)kmalloc(block_size);
+        if (!ind_buf) return -ENOMEM;
+
+        if (read_block(sbi->bdev, block_size, ind_blk, ind_buf) < 0) {
+            kfree(ind_buf);
+            return -EIO;
+        }
+
+        uint32_t blk = ind_buf[logical_block];
+        if (blk == 0) {
+            kfree(ind_buf);
+            return -EIO;
+        }
+
+        int ret = write_block(sbi->bdev, block_size, blk, buf);
+        kfree(ind_buf);
+        return ret;
+    }
+
+    /* Double/triple indirect write not supported */
     return -ENOSYS;
 }
 

@@ -32,6 +32,7 @@
 #include "perf.h"
 #include "module.h"
 #include "rtc.h"
+#include "syscall.h"
 #include <string.h>
 #include <stddef.h>
 
@@ -915,9 +916,9 @@ static void do_sysinfo(void) {
     /* OS info */
     console_draw_dash_section("  Operating System");
     console_draw_dash_row("Name", "AuroraOS");
-    console_draw_dash_row("Version", "2.3.0");
+    console_draw_dash_row("Version", "3.2.0");
     console_draw_dash_row("Architecture", "x86_64");
-    console_draw_dash_row("Build", "2026-06-19");
+    console_draw_dash_row("Build", "2026-06-20");
 
     /* Memory */
     uint64_t total, fre, used;
@@ -967,7 +968,7 @@ static void do_sysinfo(void) {
 
 static void do_about(void) {
     const char *lines[] = {
-        "  AuroraOS v2.3.0",
+        "  AuroraOS v3.2.0",
         "",
         "  Author: AuroraOS Team",
         "  License: MIT",
@@ -1430,7 +1431,7 @@ static void do_uname(const char *args) {
     /* Check for -a flag */
     while (*args == ' ') args++;
     if (args && strcmp(args, "-a") == 0) {
-        console_write("AuroraOS aurora 2.3.0 #1 SMP 2026-06-19 x86_64\n");
+        console_write("AuroraOS aurora 3.1.0 #1 SMP 2026-06-20 x86_64\n");
     } else {
         console_write("AuroraOS\n");
     }
@@ -1961,6 +1962,415 @@ static cmd_func_t cmd_find(const char *name, const char **args) {
 }
 
 /* ================================================================
+ * Pipeline & Redirection support
+ *
+ * Parses the command line for:
+ *   |  - pipe: connect stdout of left to stdin of right
+ *   >  - redirect stdout to file (truncate)
+ *   >> - redirect stdout to file (append)
+ *   <  - redirect stdin from file
+ *   &  - run in background
+ *
+ * For simple commands (no operators), falls back to the built-in
+ * command dispatch. For commands with pipes, forks each segment
+ * and connects them via pipe().
+ * ================================================================ */
+
+/* Parse a single command segment from the pipeline.
+ * Extracts the command name and arguments, and detects redirections.
+ * Returns the command string (without redirection operators),
+ * and sets *outfile/*infile if redirection is present. */
+static int parse_segment(const char *segment, char *cmd_out, size_t cmd_size,
+                         char *outfile, size_t outfile_size,
+                         char *infile, size_t infile_size,
+                         int *append_out, int *background) {
+    const char *p = segment;
+    size_t cmd_len = 0;
+
+    *append_out = 0;
+    *background = 0;
+    if (outfile) outfile[0] = '\0';
+    if (infile)  infile[0]  = '\0';
+
+    while (*p) {
+        /* Check for output redirection (> or >>) */
+        if (*p == '>') {
+            if (p[1] == '>') {
+                *append_out = 1;
+                p += 2;
+            } else {
+                p++;
+            }
+            while (*p == ' ') p++;
+            /* Extract output filename */
+            if (outfile) {
+                size_t i = 0;
+                while (*p && *p != ' ' && *p != '|' && *p != '<' && *p != '>' && *p != '&' && i < outfile_size - 1) {
+                    outfile[i++] = *p++;
+                }
+                outfile[i] = '\0';
+            } else {
+                while (*p && *p != ' ' && *p != '|' && *p != '<' && *p != '>' && *p != '&') p++;
+            }
+            continue;
+        }
+
+        /* Check for input redirection (<) */
+        if (*p == '<') {
+            p++;
+            while (*p == ' ') p++;
+            if (infile) {
+                size_t i = 0;
+                while (*p && *p != ' ' && *p != '|' && *p != '>' && *p != '<' && *p != '&' && i < infile_size - 1) {
+                    infile[i++] = *p++;
+                }
+                infile[i] = '\0';
+            } else {
+                while (*p && *p != ' ' && *p != '|' && *p != '>' && *p != '<' && *p != '&') p++;
+            }
+            continue;
+        }
+
+        /* Check for background operator (&) — must be at end or followed by space */
+        if (*p == '&' && (p[1] == '\0' || p[1] == ' ')) {
+            *background = 1;
+            p++;
+            while (*p == ' ') p++;
+            continue;
+        }
+
+        /* Regular character: copy to command output */
+        if (cmd_len < cmd_size - 1) {
+            cmd_out[cmd_len++] = *p;
+        }
+        p++;
+    }
+
+    cmd_out[cmd_len] = '\0';
+
+    /* Trim trailing whitespace from command */
+    while (cmd_len > 0 && cmd_out[cmd_len - 1] == ' ') {
+        cmd_out[--cmd_len] = '\0';
+    }
+
+    return (int)cmd_len;
+}
+
+/* Execute a pipeline of commands connected by pipes.
+ * Handles redirection and background execution.
+ * Returns 0 on success, -1 on error. */
+static int run_pipeline(const char *line) {
+    if (!line || !line[0]) return 0;
+
+    /* Check if the line contains any shell operators */
+    int has_pipe = 0, has_redirect = 0, has_bg = 0;
+    for (const char *p = line; *p; p++) {
+        if (*p == '|') has_pipe = 1;
+        if (*p == '>' || *p == '<') has_redirect = 1;
+        if (*p == '&' && (p[1] == '\0' || p[1] == ' ')) has_bg = 1;
+    }
+
+    /* If no operators, use the simple command dispatch */
+    if (!has_pipe && !has_redirect && !has_bg) {
+        const char *args = NULL;
+        cmd_func_t cmd = cmd_find(line, &args);
+        if (cmd) {
+            cmd(args);
+            return 0;
+        } else {
+            console_error_with_hint("Command not found", line);
+            console_write("  Type 'help' for available commands\n");
+            return -1;
+        }
+    }
+
+    /* For pipelines and redirections, we need to handle them specially.
+     * Since built-in commands write directly to the console, we can only
+     * pipe external commands (exec'd programs). For simplicity, we handle
+     * redirection for built-in commands by temporarily redirecting the
+     * console output, and handle pipes by forking external commands.
+     *
+     * Pipeline segments are separated by '|'.
+     * Redirections are within each segment.
+     */
+
+    /* Count pipeline segments */
+    int num_segments = 1;
+    for (const char *p = line; *p; p++) {
+        if (*p == '|') num_segments++;
+    }
+
+    if (num_segments > 4) {
+        console_error_with_hint("Too many pipeline segments", "Maximum 4 segments supported");
+        return -1;
+    }
+
+    /* Parse each segment */
+    char segments[4][256];
+    char outfiles[4][128];
+    char infiles[4][128];
+    int append_flags[4];
+    int bg_flags[4];
+    int seg_lens[4];
+    int seg_count = 0;
+
+    const char *p = line;
+    while (*p && seg_count < num_segments) {
+        /* Find the end of this segment (| or end of line) */
+        const char *start = p;
+        while (*p && *p != '|') p++;
+
+        size_t seg_len = (size_t)(p - start);
+        if (seg_len >= sizeof(segments[0])) seg_len = sizeof(segments[0]) - 1;
+
+        char seg_buf[256];
+        memcpy(seg_buf, start, seg_len);
+        seg_buf[seg_len] = '\0';
+
+        seg_lens[seg_count] = parse_segment(seg_buf, segments[seg_count],
+            sizeof(segments[seg_count]), outfiles[seg_count],
+            sizeof(outfiles[seg_count]), infiles[seg_count],
+            sizeof(infiles[seg_count]), &append_flags[seg_count],
+            &bg_flags[seg_count]);
+
+        seg_count++;
+        if (*p == '|') p++;
+        while (*p == ' ') p++;
+    }
+
+    /* Handle redirection for built-in commands (single segment case) */
+    if (seg_count == 1 && !has_pipe) {
+        char *outfile = outfiles[0][0] ? outfiles[0] : NULL;
+        char *infile  = infiles[0][0]  ? infiles[0]  : NULL;
+        int background = bg_flags[0];
+
+        /* Handle input redirection for built-in commands */
+        if (infile) {
+            int fd = fd_open_path(current, infile);
+            if (fd < 0) {
+                console_error_with_hint("Cannot open input file", infile);
+                return -1;
+            }
+            fd_dup2(current, fd, 0);  /* redirect stdin */
+            fd_close(current, fd);
+        }
+
+        /* Handle output redirection for built-in commands via console capture */
+        if (outfile) {
+            console_redirect_begin();
+        }
+
+        /* Execute the built-in command */
+        const char *args = NULL;
+        cmd_func_t cmd = cmd_find(segments[0], &args);
+        if (cmd) {
+            cmd(args);
+
+            /* If output was redirected, write captured output to file */
+            if (outfile && console_redirect_active()) {
+                size_t captured_len = 0;
+                char cap_buf[4096];
+                console_redirect_end(cap_buf, sizeof(cap_buf), &captured_len);
+
+                /* Open/create the output file */
+                struct file *f = vfs_open(outfile, 0);
+                if (!f) {
+                    /* Create new file */
+                    extern int ramfs_add_file(const char *name, const char *content);
+                    ramfs_add_file(outfile, "");
+                    f = vfs_open(outfile, 0);
+                }
+                if (f) {
+                    if (append_flags[0]) {
+                        /* For append mode, seek to end of file before writing */
+                        /* Read the file to find current size, then write at offset */
+                        /* For simplicity, we read existing content, append, and rewrite */
+                        char existing[4096];
+                        ssize_t existing_len = 0;
+                        while (existing_len < (ssize_t)sizeof(existing) - 1) {
+                            ssize_t r = vfs_read(f, existing + existing_len, 1);
+                            if (r <= 0) break;
+                            existing_len++;
+                        }
+                        existing[existing_len] = '\0';
+                        /* Re-open for writing */
+                        vfs_close(f);
+                        extern int ramfs_add_file(const char *name, const char *content);
+                        /* Combine existing + new content */
+                        char combined[8192];
+                        size_t comb_len = 0;
+                        for (ssize_t i = 0; i < existing_len && comb_len < sizeof(combined) - 1; i++)
+                            combined[comb_len++] = existing[i];
+                        for (size_t i = 0; i < captured_len && comb_len < sizeof(combined) - 1; i++)
+                            combined[comb_len++] = cap_buf[i];
+                        combined[comb_len] = '\0';
+                        ramfs_add_file(outfile, combined);
+                    } else {
+                        /* Truncate mode: write captured output directly */
+                        vfs_write(f, cap_buf, captured_len);
+                        vfs_close(f);
+                    }
+                }
+            }
+        } else {
+            /* If redirection was started but command not found, end it */
+            if (outfile && console_redirect_active()) {
+                size_t dummy;
+                console_redirect_end(NULL, 0, &dummy);
+            }
+
+            /* Try as an external command */
+            console_write_ansi(CLR_MUTED);
+            console_write("Loading ");
+            console_write(segments[0]);
+            console_write("...");
+            console_write_ansi(SGR_RESET);
+            console_putc('\n');
+            int pid = exec_elf(segments[0]);
+            if (pid < 0) {
+                console_error_with_hint("Command not found", segments[0]);
+                return -1;
+            }
+            if (!background) {
+                int status = 0;
+                waitpid(pid, &status, 0);
+            }
+        }
+
+        return 0;
+    }
+
+    /* Multi-segment pipeline: fork and connect via pipes */
+    int prev_pipe_read = -1;
+    int pids[4] = {-1, -1, -1, -1};
+
+    for (int i = 0; i < seg_count; i++) {
+        int pipe_fds[2] = {-1, -1};
+
+        /* Create pipe if this is not the last segment */
+        if (i < seg_count - 1) {
+            if (sys_pipe(pipe_fds) < 0) {
+                console_error_with_hint("pipe creation failed", NULL);
+                /* Close all previous pipes */
+                if (prev_pipe_read >= 0) fd_close(current, prev_pipe_read);
+                return -1;
+            }
+        }
+
+        /* Fork a child process */
+        int pid = sys_fork();
+        if (pid < 0) {
+            console_error_with_hint("fork failed", NULL);
+            if (pipe_fds[0] >= 0) fd_close(current, pipe_fds[0]);
+            if (pipe_fds[1] >= 0) fd_close(current, pipe_fds[1]);
+            if (prev_pipe_read >= 0) fd_close(current, prev_pipe_read);
+            return -1;
+        }
+
+        if (pid == 0) {
+            /* === CHILD PROCESS === */
+
+            /* Connect stdin from previous pipe */
+            if (prev_pipe_read >= 0) {
+                fd_dup2(current, prev_pipe_read, 0);
+                fd_close(current, prev_pipe_read);
+            }
+
+            /* Connect stdout to next pipe */
+            if (i < seg_count - 1) {
+                fd_dup2(current, pipe_fds[1], 1);
+                fd_close(current, pipe_fds[0]);
+                fd_close(current, pipe_fds[1]);
+            }
+
+            /* Handle redirection for this segment */
+            if (outfiles[i][0]) {
+                struct file *f = vfs_open(outfiles[i], 0);
+                if (!f) {
+                    extern int ramfs_add_file(const char *name, const char *content);
+                    ramfs_add_file(outfiles[i], "");
+                    f = vfs_open(outfiles[i], 0);
+                }
+                if (f) {
+                    int fd = fd_alloc(current, f);
+                    if (fd >= 0) {
+                        fd_dup2(current, fd, 1);
+                        fd_close(current, fd);
+                    }
+                }
+            }
+            if (infiles[i][0]) {
+                int fd = fd_open_path(current, infiles[i]);
+                if (fd >= 0) {
+                    fd_dup2(current, fd, 0);
+                    fd_close(current, fd);
+                }
+            }
+
+            /* Try as built-in command first, then as external */
+            const char *args = NULL;
+            cmd_func_t cmd = cmd_find(segments[i], &args);
+            if (cmd) {
+                cmd(args);
+                do_exit_current(0);
+            } else {
+                /* Execute external program */
+                int ret = exec_elf(segments[i]);
+                if (ret < 0) {
+                    console_error_with_hint("exec failed", segments[i]);
+                }
+                do_exit_current(ret < 0 ? 1 : 0);
+            }
+        } else {
+            /* === PARENT PROCESS === */
+            pids[i] = pid;
+
+            /* Close the write end of the current pipe (child uses it) */
+            if (i < seg_count - 1) {
+                fd_close(current, pipe_fds[1]);
+            }
+
+            /* Close the previous pipe's read end */
+            if (prev_pipe_read >= 0) {
+                fd_close(current, prev_pipe_read);
+            }
+
+            /* Save the read end for the next iteration */
+            prev_pipe_read = (i < seg_count - 1) ? pipe_fds[0] : -1;
+        }
+    }
+
+    /* Wait for all children (unless background) */
+    int any_background = 0;
+    for (int i = 0; i < seg_count; i++) {
+        if (bg_flags[i]) any_background = 1;
+    }
+
+    if (!any_background) {
+        for (int i = 0; i < seg_count; i++) {
+            if (pids[i] >= 0) {
+                int status = 0;
+                waitpid(pids[i], &status, 0);
+            }
+        }
+    } else {
+        console_write_ansi(CLR_MUTED);
+        for (int i = 0; i < seg_count; i++) {
+            if (pids[i] >= 0) {
+                console_write("[");
+                print_int(i + 1);
+                console_write("] ");
+                print_int(pids[i]);
+                console_putc('\n');
+            }
+        }
+        console_write_ansi(SGR_RESET);
+    }
+
+    return 0;
+}
+
+/* ================================================================
  * Main loop
  * ================================================================ */
 void shell_main(void) {
@@ -1989,14 +2399,7 @@ void shell_main(void) {
             if (strcmp(line, "") == 0) {
                 /* no-op */
             } else {
-                const char *args = NULL;
-                cmd_func_t cmd = cmd_find(line, &args);
-                if (cmd) {
-                    cmd(args);
-                } else {
-                    console_error_with_hint("Command not found", line);
-                    console_write("  Type 'help' for available commands\n");
-                }
+                run_pipeline(line);
             }
             /* Add non-empty commands to history */
             if (len > 0 && strcmp(line, "") != 0) history_add(line);

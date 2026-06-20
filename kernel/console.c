@@ -22,6 +22,45 @@ static int cursor_visible = 1;
 static uint8_t current_attr = DEFAULT_VGA_ATTR;
 
 /* ================================================================
+ * Console output redirection buffer
+ *
+ * When active, all console_write/console_putc output is captured
+ * in a kernel buffer instead of being written to the screen.
+ * Used by the shell for implementing > and >> redirection with
+ * built-in commands.  Maximum capture size is 64 KiB.
+ * ================================================================ */
+#define CONSOLE_REDIRECT_BUF_SIZE 65536
+static char  *g_redirect_buf = NULL;
+static size_t g_redirect_len = 0;
+static int    g_redirect_active = 0;
+
+void console_redirect_begin(void) {
+    if (!g_redirect_buf) {
+        extern void *kmalloc(size_t size);
+        g_redirect_buf = (char *)kmalloc(CONSOLE_REDIRECT_BUF_SIZE);
+    }
+    if (g_redirect_buf) {
+        g_redirect_len = 0;
+        g_redirect_active = 1;
+    }
+}
+
+void console_redirect_end(char *buf, size_t bufsize, size_t *out_len) {
+    g_redirect_active = 0;
+    if (out_len) *out_len = g_redirect_len;
+    if (buf && bufsize > 0 && g_redirect_buf && g_redirect_len > 0) {
+        size_t copy = g_redirect_len;
+        if (copy >= bufsize) copy = bufsize - 1;
+        for (size_t i = 0; i < copy; i++) buf[i] = g_redirect_buf[i];
+        buf[copy] = '\0';
+    }
+}
+
+int console_redirect_active(void) {
+    return g_redirect_active;
+}
+
+/* ================================================================
  * Framebuffer state (for UEFI GOP boot)
  * ================================================================ */
 static int      g_use_fb = 0;           /* 1 = framebuffer, 0 = VGA */
@@ -425,6 +464,14 @@ uint8_t console_get_attr(void) {
  * Character output
  * ================================================================ */
 void console_putc(char c) {
+    /* If redirection is active, capture output to buffer instead of screen */
+    if (g_redirect_active && g_redirect_buf) {
+        if (g_redirect_len < CONSOLE_REDIRECT_BUF_SIZE - 1) {
+            g_redirect_buf[g_redirect_len++] = c;
+        }
+        return;
+    }
+
     int max_cols = g_use_fb ? (int)g_fb_cols : COLS;
     int max_rows = g_use_fb ? (int)g_fb_rows : ROWS;
 

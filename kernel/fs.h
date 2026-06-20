@@ -38,7 +38,10 @@ struct dentry {
     struct dentry   *parent;  /* parent directory dentry */
     struct dentry   *child;   /* first child dentry (linked list) */
     struct dentry   *next;    /* next sibling dentry */
+    struct dentry   *lru_prev; /* LRU list: previous entry */
+    struct dentry   *lru_next; /* LRU list: next entry */
     int              refcount;
+    int              access_count; /* access count for LRU aging */
 };
 
 /* Open file description */

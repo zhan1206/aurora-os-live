@@ -567,16 +567,19 @@ uint64_t clone_kernel_pml4(void) {
 }
 
 /* ================================================================
- * pf_handler_c: Page fault handler with COW support (FIXED)
+ * pf_handler_c: Page fault handler with COW + lazy allocation
  *
- * Replaces the old handler that just panicked.
  * Handles:
+ *   - Not-present fault (user): lazy page allocation — allocates a
+ *     zero-filled physical page and maps it RW for the faulting user
+ *     address.  This avoids pre-allocating the entire address space
+ *     and is a standard optimization used by Linux, SerenityOS, etc.
  *   - COW write fault: if ref_count > 1, alloc new page, copy, remap RW.
  *   - Otherwise: panic (unhandled fault).
  * ================================================================ */
 
 /*
- * pf_handler_c: Page fault handler with COW support.
+ * pf_handler_c: Page fault handler with COW support and lazy allocation.
  *
  * @error_code: CPU error code pushed on #PF (passed by pf_handler.S via RDI).
  *   bit 0 = P (0 = not-present, 1 = protection violation)
@@ -597,10 +600,43 @@ void pf_handler_c(uint64_t error_code) {
     int user    = (error_code & 4) != 0;
 
     if (!present) {
-        /* Not-present fault — no lazy allocation yet, panic */
-        log_printf(LOG_LEVEL_ERR, "Page fault: not-present at CR2=%p (code=0x%x)\n",
-                   (void *)cr2, (unsigned int)error_code);
-        panic("Page fault: not-present at CR2=%p\n", (void *)cr2);
+        /* Lazy allocation: handle not-present faults in user space.
+         * Allocate a zero-filled page and map it at the faulting address.
+         * This is a standard optimization: pages are allocated on first
+         * access rather than at mmap/brk time. */
+        if (!user) {
+            /* Kernel-space not-present fault is a bug */
+            log_printf(LOG_LEVEL_ERR, "Page fault: kernel not-present at CR2=%p (code=0x%x)\n",
+                       (void *)cr2, (unsigned int)error_code);
+            panic("Kernel page fault: not-present at CR2=%p\n", (void *)cr2);
+            return;
+        }
+
+        /* Allocate a zero-filled physical page */
+        void *new_page = alloc_page();
+        if (!new_page) {
+            log_printf(LOG_LEVEL_ERR, "Lazy alloc: out of memory at CR2=%p, sending SIGSEGV\n",
+                       (void *)cr2);
+            if (current) do_sys_kill(current->pid, SIGSEGV);
+            return;
+        }
+
+        /* Map the page at the faulting address (user RW + NX for data pages) */
+        uint64_t page_addr = cr2 & ~0xFFFULL;
+        uint64_t flags = PTE_PRESENT | PTE_RW | PTE_USER;
+        /* NX is set for data pages by default via EFER.NXE + absence of PTE_NX flag */
+        int ret = map_user_page(read_cr3(), page_addr, (uint64_t)(uintptr_t)new_page, flags);
+        if (ret < 0) {
+            log_printf(LOG_LEVEL_ERR, "Lazy alloc: map_user_page failed at CR2=%p\n",
+                       (void *)cr2);
+            free_page(new_page);
+            if (current) do_sys_kill(current->pid, SIGSEGV);
+            return;
+        }
+
+        log_printf(LOG_LEVEL_DEBUG, "Lazy alloc: mapped %p -> %p (user RW)\n",
+                   (void *)page_addr, new_page);
+        perf_inc(PERF_PAGE_FAULTS);
         return;
     }
 

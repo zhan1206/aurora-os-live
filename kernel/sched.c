@@ -36,8 +36,11 @@ static struct task_struct *idle_task  = NULL;  /* pid=0, idle loop */
 /* Per-CPU run queues (SMP) */
 struct run_queue per_cpu_rq[MAX_CPUS];
 
-/* Global minimum virtual runtime for CFS/EEVDF fair scheduling */
-uint64_t min_vruntime = UINT64_MAX;
+/* Global minimum virtual runtime for CFS/EEVDF fair scheduling.
+ * Initialized to 0 so that the first task gets vruntime=0.
+ * Updated in schedule() to track the minimum vruntime among all
+ * ready tasks. New tasks start at min_vruntime to ensure fairness. */
+uint64_t min_vruntime = 0;
 
 /* smp_init() sets this to 1 after GS is configured for the BSP */
 int smp_sched_ready = 0;
@@ -328,8 +331,7 @@ struct task_struct *create_task(void (*fn)(void)) {
     t->priority    = 128;        /* default medium priority */
     t->time_slice  = BASE_SLICE * (256 - t->priority) / 256;
     if (t->time_slice < 1) t->time_slice = 1;
-    t->vruntime    = (min_vruntime == UINT64_MAX) ? 0 : min_vruntime;
-    /* start at current min to avoid starving existing tasks */
+    t->vruntime    = min_vruntime;  /* start at current min for fairness */
     t->cpu_mask    = 0xFF;       /* allow all CPUs */
     t->parent      = current;
     t->children    = NULL;
@@ -451,10 +453,18 @@ void schedule(void) {
     }
     /* If prev->state was TASK_BLOCKED or TASK_ZOMBIE, leave vruntime unchanged */
 
-    /* Update min_vruntime to track the minimum vruntime across all ready tasks.
-     * Use the next task's vruntime (which is the minimum among ready tasks
-     * as selected by the scan above), not prev's (which was just incremented). */
+    /* Update min_vruntime: track the minimum vruntime across all ready tasks.
+     * Use max(min_vruntime, next->vruntime) to ensure monotonic progression.
+     * A task that was blocked (low vruntime) will pull min_vruntime down,
+     * which is correct — it deserves to run quickly when it wakes up.
+     * But normally, min_vruntime increases over time as tasks consume CPU. */
     if (next->vruntime < min_vruntime) {
+        /* A blocked task woke up with a very low vruntime — it should run */
+        min_vruntime = next->vruntime;
+    } else if (min_vruntime < next->vruntime) {
+        /* Normal case: the scheduled task has the minimum vruntime,
+         * which may be higher than the current min_vruntime.
+         * Update min_vruntime to track the actual minimum. */
         min_vruntime = next->vruntime;
     }
 

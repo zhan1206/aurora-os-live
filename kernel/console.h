@@ -82,4 +82,9 @@ void console_set_tab_complete_callback(void (*cb)(void));
 void console_replace_line(const char *new_text);
 const char *console_get_current_line(void);
 
+/* Output redirection (for shell > / >> operators with built-in commands) */
+void console_redirect_begin(void);
+void console_redirect_end(char *buf, size_t bufsize, size_t *out_len);
+int  console_redirect_active(void);
+
 #endif
