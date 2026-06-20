@@ -1,5 +1,25 @@
 # AuroraOS Changelog
 
+## v3.2.0 (2026-06-20) — Comprehensive Bug Fixes & UX Optimization
+
+### Bug 修复
+- **uname -a 版本号不一致**: 修复 `uname -a` 输出显示 "3.1.0" 而其他模块显示 "3.2.0" 的版本号不一致问题
+- **mkdir dentry name 内存分配错误**: 修复 `do_mkdir` 中直接向 `dentry->name` (const char* 指针) 写入数据的严重Bug，改为先 kmalloc 分配 name 缓冲区再赋值
+- **lock/login 硬编码日期**: 修复 `do_lock` 和 `do_login` 中硬编码 "14:30" / "2026-06-19" 的问题，改为使用 RTC 实时读取日期时间，并包含 RTC 不可用时的回退值
+
+### 用户体验改进
+- **ls 命令增强**: 显示文件实际大小（B/KB），添加条目计数显示，通过 ramfs_node 读取实际文件大小
+- **login 屏幕**: 日期时间从硬编码改为 RTC 实时读取，使用 Zeller 公式计算星期
+- **lock 屏幕**: 同样使用 RTC 实时时间，不再显示固定时间
+
+### 文件 I/O API 完善
+- **fd_write_fd**: 新增文件描述符写入函数，与已有的 fd_read_fd 对称，完善文件 I/O API
+
+### 文档更新
+- README.md: 更新代码行数（~8,500）、测试数量（20个）、版本号（v3.2.0）
+- 所有关键函数添加了自研声明和详细的文档注释
+
+---
 ## v3.0.4 (2026-06-20) — CoolPotOS-Inspired Performance & Security Optimizations
 
 ### CoolPotOS 学习成果深度集成

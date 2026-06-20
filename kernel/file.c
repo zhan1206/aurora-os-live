@@ -57,6 +57,12 @@ ssize_t fd_read_fd(struct task_struct *t, int fd, void *buf, size_t count) {
     return vfs_read(f, buf, count);
 }
 
+ssize_t fd_write_fd(struct task_struct *t, int fd, const void *buf, size_t count) {
+    struct file *f = (struct file *)fd_get(t, fd);
+    if (!f) return -1;
+    return vfs_write(f, buf, count);
+}
+
 void fd_close_all(struct task_struct *t) {
     if (!t) return;
     for (int i = 0; i < MAX_FDS; ++i) {

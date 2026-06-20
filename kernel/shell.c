@@ -605,12 +605,24 @@ static void do_ls(void) {
         return;
     }
 
+    /* Count entries first for the header */
+    int count = 0;
+    struct dentry *d = sb->root_dentry->child;
+    while (d) { if (d->name && d->inode) count++; d = d->next; }
+
+    console_write_ansi(CLR_MUTED);
+    console_write("  ");
+    print_int(count);
+    console_write(" entries");
+    console_write_ansi(SGR_RESET);
+    console_putc('\n');
+
     console_write_ansi(CLR_MUTED);
     console_write("  Name                    Type       Size\n");
     console_write_ansi(SGR_RESET);
     console_draw_hr(SEP_DOT);
 
-    struct dentry *d = sb->root_dentry->child;
+    d = sb->root_dentry->child;
     while (d) {
         if (d->name && d->inode) {
             console_write("  ");
@@ -634,11 +646,33 @@ static void do_ls(void) {
             console_write(d->inode->is_dir ? "DIR " : "FILE");
             console_write_ansi(SGR_RESET);
 
-            /* Size (not available in current inode — show placeholder) */
+            /* Size: read from ramfs inode if available */
             console_write("     ");
-            console_write_ansi(CLR_MUTED);
-            console_write("   ?");
-            console_write_ansi(SGR_RESET);
+            if (!d->inode->is_dir && d->inode->priv) {
+                /* ramfs_node has size field at offset sizeof(struct inode) */
+                extern void *get_inode_priv_sz(struct inode *ino);
+                size_t fsize = 0;
+                /* Access ramfs_node size through the inode's private data */
+                struct ramfs_node_probe {
+                    char pad[0];  /* inode fields */
+                    void *next;
+                    size_t size;
+                    char *data;
+                };
+                struct ramfs_node_probe *rn = (struct ramfs_node_probe *)d->inode;
+                fsize = rn->size;
+                if (fsize < 1024) {
+                    print_int((int)fsize);
+                    console_write(" B");
+                } else {
+                    print_int((int)(fsize / 1024));
+                    console_write(" KB");
+                }
+            } else {
+                console_write_ansi(CLR_MUTED);
+                console_write(d->inode->is_dir ? "   -" : "   ?");
+                console_write_ansi(SGR_RESET);
+            }
 
             console_putc('\n');
         }
@@ -1431,7 +1465,7 @@ static void do_uname(const char *args) {
     /* Check for -a flag */
     while (*args == ' ') args++;
     if (args && strcmp(args, "-a") == 0) {
-        console_write("AuroraOS aurora 3.1.0 #1 SMP 2026-06-20 x86_64\n");
+        console_write("AuroraOS aurora 3.2.0 #1 SMP 2026-06-20 x86_64\n");
     } else {
         console_write("AuroraOS\n");
     }
@@ -1685,23 +1719,31 @@ static void do_mkdir(const char *args) {
         return;
     }
 
+    /* Allocate name buffer first (so we can free on error) */
+    size_t name_len = 0;
+    for (const char *p = args; *p && name_len < 255; p++) name_len++;
+    char *name_buf = (char *)kmalloc(name_len + 1);
+    if (!name_buf) {
+        console_error_with_hint("mkdir: out of memory", NULL);
+        return;
+    }
+    memcpy(name_buf, args, name_len);
+    name_buf[name_len] = '\0';
+
     /* Create a new dentry */
     struct dentry *new_dentry = (struct dentry *)kmalloc(sizeof(*new_dentry));
     if (!new_dentry) {
+        kfree(name_buf);
         console_error_with_hint("mkdir: out of memory", NULL);
         return;
     }
     memset(new_dentry, 0, sizeof(*new_dentry));
-
-    /* Copy name */
-    size_t i;
-    for (i = 0; args[i] && i < 255; i++)
-        ((char *)new_dentry->name)[i] = args[i];
-    ((char *)new_dentry->name)[i] = '\0';
+    new_dentry->name = name_buf;
 
     /* Create inode */
     struct inode *new_inode = (struct inode *)kmalloc(sizeof(*new_inode));
     if (!new_inode) {
+        kfree(name_buf);
         kfree(new_dentry);
         console_error_with_hint("mkdir: out of memory", NULL);
         return;
