@@ -230,15 +230,21 @@ void kernel_main(uint32_t magic, void *mb_info) {
     printk_console_ready();
 
     /* === Phase 3: Kernel Subsystems === */
+    printk("scheduler_init...\n");
     scheduler_init();
+    printk("scheduler_init done\n");
     console_status_ok("Scheduler (RR + idle task + PID bitmap)");
     BOOT_STEP();
 
+    printk("syscall_init...\n");
     syscall_init();
+    printk("syscall_init done\n");
     console_status_ok("SYSCALL/SYSRET MSRs configured");
     BOOT_STEP();
 
+    printk("irq_init...\n");
     irq_init();
+    printk("irq_init done\n");
     console_status_ok("IDT + PIC remap + keyboard driver");
     BOOT_STEP();
 
@@ -247,7 +253,9 @@ void kernel_main(uint32_t magic, void *mb_info) {
      * This parses ACPI MADT, detects CPUs, and starts APs.
      * Falls back to single-CPU mode if no ACPI/MADT found.
      */
+    printk("smp_init...\n");
     smp_init(mb_info);
+    printk("smp_init done\n");
     console_status_ok("SMP (detected CPUs)");
     BOOT_STEP();
 
@@ -258,7 +266,9 @@ void kernel_main(uint32_t magic, void *mb_info) {
      * Without the IDT, a page fault during split_huge_page would
      * cause a triple fault and silent hang.
      */
+    printk("rodata_protect...\n");
     rodata_protect();
+    printk("rodata_protect done\n");
     console_status_ok("Read-only data segment");
     BOOT_STEP();
 

@@ -234,6 +234,23 @@ static void buddy_mark_available(uint64_t start_pfn, uint64_t end_pfn) {
     }
 }
 
+/* Coalesce all free pages into larger blocks.
+ * Called once after initialization to build large contiguous blocks. */
+static struct page *buddy_merge(struct page *p);
+static void buddy_coalesce_all(void) {
+    for (uint32_t order = 0; order < MAX_ORDER; order++) {
+        struct page *p = free_area[order];
+        if (!p) continue;
+        struct page *start = p;
+        do {
+            struct page *next = p->next;
+            buddy_merge(p);
+            p = next;
+            /* After merge, the list may have changed; re-scan */
+        } while (p && p != start && free_area[order]);
+    }
+}
+
 /* Split a block of given order into two blocks of order-1 */
 static struct page *buddy_split(uint32_t order) {
     if (order == 0 || order > MAX_ORDER) return NULL;
@@ -424,6 +441,8 @@ void phys_mem_init(void *mb_info) {
      * pages won't be added to free lists. */
     buddy_mark_available(kernel_reserved_pages, total_phys_pages);
 
+    buddy_coalesce_all();
+
     log_printf(LOG_LEVEL_INFO, "phys_mem: buddy system initialized, free pages = %d\n",
                (int)stat_total_pages);
 }
@@ -527,6 +546,8 @@ void phys_mem_init_uefi(void *bi_raw) {
             buddy_mark_available(start_pfn, end_pfn);
         }
     }
+
+    buddy_coalesce_all();
 
     log_printf(LOG_LEVEL_INFO, "phys_mem_uefi: buddy system initialized, free pages = %d\n",
                (int)stat_total_pages);

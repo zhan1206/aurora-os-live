@@ -4,7 +4,7 @@
  * Provides a simple RAM-backed block device that can be used
  * to test ext2 or other filesystems without real hardware.
  *
- * Default size: 16 MiB
+ * Default size: 1 MiB (static buffer)
  * Block size: 512 bytes
  */
 #include "block_dev.h"
@@ -12,12 +12,15 @@
 #include "mem.h"
 #include <string.h>
 
-#define RAMDISK_DEFAULT_MB  16
+#define RAMDISK_SIZE_BYTES  (1024 * 1024)   /* 1 MiB */
 
 struct ramdisk_priv {
     uint8_t *data;       /* memory buffer */
     uint64_t size;       /* total size in bytes */
 };
+
+/* Static buffer for the ramdisk data — avoids buddy allocator fragmentation issues */
+static uint8_t ramdisk_buffer[RAMDISK_SIZE_BYTES] __attribute__((aligned(4096)));
 
 /* We store the ramdisk priv pointer globally so read/write can find it.
  * The read/write ops don't receive a bdev pointer. */
@@ -56,31 +59,31 @@ static int ramdisk_write(const void *buf, uint64_t sector, int count) {
 
 /*
  * ramdisk_init: Create and register a RAM disk.
- * @size_mb: size in megabytes (0 = default 16 MiB)
+ * @size_mb: size in megabytes (0 = default 1 MiB)
  * Returns 0 on success, negative on error.
  */
 int ramdisk_init(uint64_t size_mb) {
     struct block_device *bdev = (struct block_device *)kmalloc(sizeof(*bdev));
-    if (!bdev) return -1;
+    if (!bdev) {
+        log_printf(LOG_LEVEL_ERR, "ramdisk: failed to allocate bdev\n");
+        return -1;
+    }
     memset(bdev, 0, sizeof(*bdev));
 
     struct ramdisk_priv *priv = (struct ramdisk_priv *)kmalloc(sizeof(*priv));
     if (!priv) {
+        log_printf(LOG_LEVEL_ERR, "ramdisk: failed to allocate priv\n");
         kfree(bdev);
         return -1;
     }
     memset(priv, 0, sizeof(*priv));
 
-    uint64_t size = size_mb ? size_mb * 1024 * 1024 :
-                    (uint64_t)RAMDISK_DEFAULT_MB * 1024 * 1024;
-    priv->data = (uint8_t *)kmalloc((size_t)size);
-    if (!priv->data) {
-        kfree(priv);
-        kfree(bdev);
-        return -1;
-    }
-    memset(priv->data, 0, (size_t)size);
+    uint64_t size = size_mb ? size_mb * 1024 * 1024 : RAMDISK_SIZE_BYTES;
+    if (size > RAMDISK_SIZE_BYTES) size = RAMDISK_SIZE_BYTES;
+
+    priv->data = ramdisk_buffer;
     priv->size = size;
+    memset(priv->data, 0, (size_t)size);
 
     /* Store in globals for the read/write callbacks */
     g_ramdisk_priv = priv;
@@ -96,5 +99,9 @@ int ramdisk_init(uint64_t size_mb) {
     bdev->ioctl         = NULL;
     bdev->priv          = priv;
 
-    return block_dev_register(bdev);
+    int ret = block_dev_register(bdev);
+    log_printf(LOG_LEVEL_INFO, "ramdisk: registered '%s' (%llu KiB, %llu sectors)\n",
+               bdev->name, (unsigned long long)size / 1024,
+               (unsigned long long)bdev->total_sectors);
+    return ret;
 }

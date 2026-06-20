@@ -88,17 +88,7 @@ void page_table_init(void) {
      *
      * CoolPotOS-inspired security hardening.
      */
-    uint64_t cr4;
-    asm volatile ("mov %%cr4, %0" : "=r"(cr4));
-    int smep_enabled = (cr4 & (1ULL << 20)) != 0;
-    int smap_enabled = (cr4 & (1ULL << 21)) != 0;
-
-    if (!smep_enabled || !smap_enabled) {
-        cr4 |= (1ULL << 20) | (1ULL << 21);
-        asm volatile ("mov %0, %%cr4" :: "r"(cr4) : "memory");
-        if (!smep_enabled) log_printf(LOG_LEVEL_INFO, "pagetable: SMEP enabled\n");
-        if (!smap_enabled) log_printf(LOG_LEVEL_INFO, "pagetable: SMAP enabled\n");
-    }
+    /* SMEP/SMAP deferred for now — needs page table audit */
 }
 
 uint64_t get_kernel_cr3(void) {

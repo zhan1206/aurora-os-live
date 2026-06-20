@@ -21,7 +21,12 @@
 #include "signal.h"
 #include "rtc.h"
 #include "include/log.h"
+#include "include/print.h"
 #include "include/assert.h"
+#include "journal.h"
+#include "fsck.h"
+#include "block_dev.h"
+#include "ext2.h"
 #include <string.h>
 #include <stdint.h>
 
@@ -439,6 +444,161 @@ static void test_signal_edge(void) {
 }
 
 /* ================================================================
+ * Test: Journal (WAL) operations
+ * ================================================================ */
+static void test_journal(void) {
+    log_printf(LOG_LEVEL_INFO, "--- Journal (WAL) Tests ---\n");
+
+    struct block_device *ramdisk = block_dev_find("ramdisk0");
+    if (!ramdisk) {
+        log_printf(LOG_LEVEL_INFO, "  [SKIP] no ramdisk for journal test\n");
+        return;
+    }
+
+    /* Journal area: last 128 blocks of the device */
+    uint32_t block_size = 1024;
+    uint32_t spb = block_size / ramdisk->block_size;
+    uint64_t total_blocks = ramdisk->total_sectors / spb;
+    uint64_t journal_start = total_blocks > 192 ? total_blocks - 192 : 0;
+    uint64_t journal_blocks = 128;
+
+    if (journal_start == 0) {
+        log_printf(LOG_LEVEL_INFO, "  [SKIP] device too small for journal test\n");
+        return;
+    }
+
+    /* Initialize journal */
+    int ret = journal_init(ramdisk, journal_start, journal_blocks, block_size);
+    if (ret != 0) {
+        TEST_FAIL("journal_init");
+        return;
+    }
+    TEST_PASS("journal_init");
+
+    /* Begin a transaction */
+    if (journal_begin(4) != 0) {
+        TEST_FAIL("journal_begin");
+        return;
+    }
+    TEST_PASS("journal_begin");
+
+    /* Write blocks to the transaction */
+    uint8_t test_data[1024];
+    memset(test_data, 0xAB, sizeof(test_data));
+    if (journal_write(0, test_data) != 0) {
+        journal_rollback();
+        TEST_FAIL("journal_write");
+        return;
+    }
+    memset(test_data, 0xCD, sizeof(test_data));
+    if (journal_write(1, test_data) != 0) {
+        journal_rollback();
+        TEST_FAIL("journal_write (block 2)");
+        return;
+    }
+    TEST_PASS("journal_write");
+
+    /* Commit the transaction */
+    if (journal_commit() != 0) {
+        TEST_FAIL("journal_commit");
+        return;
+    }
+    TEST_PASS("journal_commit");
+
+    /* Verify journal is clean */
+    if (!journal_is_clean()) {
+        TEST_FAIL("journal not clean after commit");
+        return;
+    }
+    TEST_PASS("journal_is_clean after commit");
+
+    /* Test rollback */
+    if (journal_begin(2) != 0) {
+        TEST_FAIL("journal_begin (rollback test)");
+        return;
+    }
+    memset(test_data, 0xEF, sizeof(test_data));
+    journal_write(2, test_data);
+    if (journal_rollback() != 0) {
+        TEST_FAIL("journal_rollback");
+        return;
+    }
+    TEST_PASS("journal_rollback");
+
+    /* Test double begin rejection */
+    if (journal_begin(1) == 0) {
+        if (journal_begin(1) == 0) {
+            journal_rollback();
+            TEST_FAIL("double journal_begin should fail");
+        }
+        journal_rollback();
+    }
+    TEST_PASS("journal_begin reentry rejection");
+
+    /* Stats test */
+    uint64_t total, used, txns;
+    int dirty;
+    journal_get_stats(&total, &used, &txns, &dirty);
+    if (total != journal_blocks) TEST_FAIL("journal stats: total mismatch");
+    if (dirty != 0) TEST_FAIL("journal stats: dirty flag");
+    TEST_PASS("journal_get_stats");
+
+    log_printf(LOG_LEVEL_INFO, "  [INFO] journal: %llu/%llu blocks used, %llu transactions\n",
+               (unsigned long long)used, (unsigned long long)total,
+               (unsigned long long)txns);
+}
+
+/* ================================================================
+ * Test: fsck operations
+ * ================================================================ */
+static void test_fsck(void) {
+    log_printf(LOG_LEVEL_INFO, "--- Fsck Tests ---\n");
+
+    struct block_device *ramdisk = block_dev_find("ramdisk0");
+    if (!ramdisk) {
+        log_printf(LOG_LEVEL_INFO, "  [SKIP] no ramdisk for fsck test\n");
+        return;
+    }
+
+    /* Quick check */
+    int qc = fsck_quick_check(ramdisk);
+    if (qc != 0) {
+        log_printf(LOG_LEVEL_INFO, "  [SKIP] fsck quick check (no ext2 on ramdisk)\n");
+        return;
+    }
+    TEST_PASS("fsck_quick_check");
+
+    /* Superblock read */
+    uint8_t sb_buf[1024];
+    if (fsck_read_superblock(ramdisk, 0, sb_buf) != 0) {
+        TEST_FAIL("fsck_read_superblock (primary)");
+        return;
+    }
+    struct ext2_superblock *sb = (struct ext2_superblock *)sb_buf;
+    if (sb->s_magic != EXT2_SUPER_MAGIC) {
+        TEST_FAIL("fsck_read_superblock (magic)");
+        return;
+    }
+    TEST_PASS("fsck_read_superblock");
+
+    /* Full fsck run */
+    struct fsck_stats stats;
+    int result = fsck_run(ramdisk, 0, &stats);
+    if (result == FSCK_FATAL) {
+        TEST_FAIL("fsck_run returned FATAL");
+        return;
+    }
+    TEST_PASS("fsck_run");
+
+    log_printf(LOG_LEVEL_INFO, "  [INFO] fsck: sb=%u/%u/%u grp=%u/%u/%u blk=%u/%u/%u ino=%u/%u/%u dir=%u/%u/%u\n",
+               stats.superblock_checked, stats.superblock_errors, stats.superblock_fixed,
+               stats.groups_checked, stats.groups_errors, stats.groups_fixed,
+               stats.blocks_checked, stats.blocks_errors, stats.blocks_fixed,
+               stats.inodes_checked, stats.inodes_errors, stats.inodes_fixed,
+               stats.dirs_checked, stats.dirs_errors, stats.dirs_fixed);
+}
+
+/* ================================================================
  * Run all tests
  * ================================================================ */
 
@@ -448,7 +608,8 @@ void kernel_selftest(void) {
     test_buddy();
     test_slab();
     test_pagetable();
-    test_scheduler();
+    test_journal();
+    test_fsck();
     test_vfs();
     test_pipe();
     test_string();
@@ -456,6 +617,7 @@ void kernel_selftest(void) {
     test_inode_size();
     test_dentry_cache();
     test_signal_edge();
+    test_scheduler();
 
     log_printf(LOG_LEVEL_INFO, "======== All Tests Passed ========\n\n");
 }
