@@ -987,6 +987,7 @@ void smp_init(void *mb_info) {
 
     log_printf(LOG_LEVEL_INFO, "smp: %d CPU(s) online\n", (int)ap_online_count);
 
+    smp_sched_ready = 1;  /* Allow GS-based current_cpu_id() */
     smp_initialized = 1;
     spin_unlock(&smp_init_lock);
 }

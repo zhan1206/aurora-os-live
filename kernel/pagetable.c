@@ -120,10 +120,7 @@ uint64_t get_kernel_cr3(void) {
  * The kernel identity-maps physical memory 0..kernel_end (~1GB).
  * phys_to_virt validates that a physical address is within this range.
  */
-static inline uint64_t *phys_to_virt(uint64_t pa) {
-    /* Assert: physical address must be within identity-mapped range.
-     * The kernel identity-maps 0..1GB, so any physical address
-     * used in page table walks must be within this range. */
+uint64_t *phys_to_virt(uint64_t pa) {
     if (pa >= KERNEL_PHYS_MAX) {
         log_printf(LOG_LEVEL_ERR, "pagetable: phys_to_virt: invalid pa %p\n",
                    (void *)(uintptr_t)pa);

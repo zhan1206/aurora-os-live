@@ -120,7 +120,7 @@ void *elf_load(const char *path, uint64_t *pml4_out) {
             if (toread > remaining) toread = remaining;
 
             /* Walk page table to find physical page (with PRESENT checks) */
-            uint64_t *pml4 = (uint64_t*)(uintptr_t)new_pml4;
+            uint64_t *pml4 = (uint64_t*)phys_to_virt(new_pml4);
             uint64_t pml4_idx = (page_vbase >> 39) & 0x1FF;
             if (!(pml4[pml4_idx] & PTE_PRESENT)) break;
             uint64_t pdpt_phys = pml4[pml4_idx] & PTE_ADDR_MASK;

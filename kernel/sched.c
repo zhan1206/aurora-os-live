@@ -37,15 +37,17 @@ static struct task_struct *idle_task  = NULL;  /* pid=0, idle loop */
 struct run_queue per_cpu_rq[MAX_CPUS];
 
 /* Global minimum virtual runtime for CFS/EEVDF fair scheduling */
-uint64_t min_vruntime = 0;
+uint64_t min_vruntime = UINT64_MAX;
+
+/* smp_init() sets this to 1 after GS is configured for the BSP */
+int smp_sched_ready = 0;
 
 /* Current CPU ID helper (0 = BSP, increments for each AP) */
 static inline int current_cpu_id(void) {
-    /* On SMP, we use GS segment to get cpu_data. On single-core, return 0.
-     * GS is set up during smp_init() for BSP and ap_entry() for APs.
-     * Before SMP init, we return 0 (BSP).
-     * After SMP init, GS base points to &cpu_data[n], and cpu_data[n].cpu_id
-     * is at offset 0, so mov %%gs:0 returns the cpu_id. */
+    /* Before SMP init, GS base is 0 (set by syscall_init).
+     * Reading %%gs:0 would dereference address 0, potentially
+     * causing a page fault. Return 0 (BSP) until SMP is ready. */
+    if (!smp_sched_ready) return 0;
     int cpu_id = 0;
     asm volatile ("mov %%gs:0, %0" : "=r"(cpu_id));
     if (cpu_id < 0 || cpu_id >= MAX_CPUS) cpu_id = 0;
@@ -326,7 +328,8 @@ struct task_struct *create_task(void (*fn)(void)) {
     t->priority    = 128;        /* default medium priority */
     t->time_slice  = BASE_SLICE * (256 - t->priority) / 256;
     if (t->time_slice < 1) t->time_slice = 1;
-    t->vruntime    = min_vruntime;  /* start at current min to avoid starvation */
+    t->vruntime    = (min_vruntime == UINT64_MAX) ? 0 : min_vruntime;
+    /* start at current min to avoid starving existing tasks */
     t->cpu_mask    = 0xFF;       /* allow all CPUs */
     t->parent      = current;
     t->children    = NULL;
@@ -342,8 +345,8 @@ struct task_struct *create_task(void (*fn)(void)) {
     pid_register(t->pid, t);
 
     /* Choose a CPU for this task (round-robin across CPUs) */
-    int target_cpu = t->pid % num_cpus;
     if (num_cpus == 0) num_cpus = 1;
+    int target_cpu = t->pid % num_cpus;
     if (target_cpu >= num_cpus) target_cpu = 0;
 
     /* Add to the target CPU's run queue */
@@ -448,9 +451,11 @@ void schedule(void) {
     }
     /* If prev->state was TASK_BLOCKED or TASK_ZOMBIE, leave vruntime unchanged */
 
-    /* Update min_vruntime to track the minimum vruntime across all ready tasks */
-    if (prev->state == TASK_READY && prev->vruntime < min_vruntime) {
-        min_vruntime = prev->vruntime;
+    /* Update min_vruntime to track the minimum vruntime across all ready tasks.
+     * Use the next task's vruntime (which is the minimum among ready tasks
+     * as selected by the scan above), not prev's (which was just incremented). */
+    if (next->vruntime < min_vruntime) {
+        min_vruntime = next->vruntime;
     }
 
     next->state = TASK_RUNNING;

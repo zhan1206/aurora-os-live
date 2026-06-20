@@ -226,6 +226,8 @@ int sys_pipe(int *fds) {
         else if (rfilp) { kfree(rfilp); rfilp = NULL; }
         if (wfd >= 0) fd_close(current, wfd);
         else if (wfilp) { kfree(wfilp); wfilp = NULL; }
+        /* Clean up remaining resources: inodes and ring buffer */
+        kfree(ring); kfree(rinode); kfree(winode);
         return -1;
     }
 

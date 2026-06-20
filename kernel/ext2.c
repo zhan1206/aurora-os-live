@@ -434,6 +434,10 @@ static int ext2_file_close(struct inode *inode, struct file *filp) {
     return 0;
 }
 
+/* Forward declarations */
+static struct file_ops ext2_file_ops;
+static struct file_ops ext2_dir_ops;
+
 static int ext2_dir_lookup(struct inode *dir, struct dentry *dentry) {
     if (!dir || !dir->priv || !dentry) return -EINVAL;
 
@@ -514,15 +518,12 @@ static int ext2_dir_lookup(struct inode *dir, struct dentry *dentry) {
 
                 /* Assign operations based on type */
                 if (child_info->raw.i_mode & EXT2_S_IFDIR) {
-                    child_inode->ops    = NULL; /* will be set below */
+                    child_inode->ops    = &ext2_dir_ops;
                     child_inode->is_dir = 1;
                 } else {
-                    child_inode->ops    = NULL; /* will be set below */
+                    child_inode->ops    = &ext2_file_ops;
                     child_inode->is_dir = 0;
                 }
-                /* We assign ops below using the same static tables */
-
-                /* We'll set child_inode->ops below */
                 dentry->inode = child_inode;
 
                 kfree(block_buf);

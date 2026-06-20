@@ -168,8 +168,8 @@ int vfs_mount(const char *path, struct super_block *sb) {
 
 /* Check if a path component is a traversal attempt ("." or "..") */
 static int is_path_traversal(const char *name, size_t len) {
-    if (len == 1 && name[0] == '.') return 1;
-    if (len == 2 && name[0] == '.' && name[1] == '.') return 1;
+    if (len == 1 && name[0] == '.') return 0;  /* "." is valid: current directory */
+    if (len == 2 && name[0] == '.' && name[1] == '.') return 1;  /* ".." is traversal */
     return 0;
 }
 
@@ -191,11 +191,17 @@ struct inode *vfs_lookup(const char *path) {
         if (len == 0) { p++; continue; }  /* skip "//" */
         if (len > 255) return NULL;        /* component too long */
 
-        /* Reject path traversal (".", "..") */
+        /* Reject path traversal ("..") */
         if (is_path_traversal(start, len)) {
             log_printf(LOG_LEVEL_WARN, "VFS: path traversal rejected: %.*s\n",
                        (int)len, start);
             return NULL;
+        }
+
+        /* Handle "." component: skip it, stay in current directory */
+        if (len == 1 && start[0] == '.') {
+            if (*p == '/') p++;
+            continue;
         }
 
         /* Use stack buffer to avoid kmalloc for temporary name */

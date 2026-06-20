@@ -86,7 +86,9 @@ static long sys_write(int fd, const void *buf, size_t count) {
         while (remaining > 0) {
             size_t chunk = (remaining > 256) ? 256 : remaining;
             char tmp[257];
-            memcpy(tmp, s, chunk);
+            if (copy_from_user(tmp, s, chunk) != 0) {
+                return -1;
+            }
             tmp[chunk] = '\0';
             printk(tmp);
             s += chunk;
@@ -294,7 +296,7 @@ static long sys_mprotect(void *addr, size_t length, int prot) {
         uint64_t pd_idx   = (va_page >> 21) & 0x1FF;
         uint64_t pt_idx   = (va_page >> 12) & 0x1FF;
 
-        uint64_t *pml4 = (uint64_t *)(uintptr_t)current->cr3;
+        uint64_t *pml4 = (uint64_t *)phys_to_virt(current->cr3);
         if (!(pml4[pml4_idx] & PTE_PRESENT)) { va_page += PAGE_SIZE; continue; }
         uint64_t *pdpt = (uint64_t *)(uintptr_t)(pml4[pml4_idx] & PTE_ADDR_MASK);
         if (!(pdpt[pdpt_idx] & PTE_PRESENT)) { va_page += PAGE_SIZE; continue; }

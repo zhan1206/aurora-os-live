@@ -1994,7 +1994,8 @@ void shell_main(void) {
                 if (cmd) {
                     cmd(args);
                 } else {
-                    console_error_with_hint(line, "Type 'help' for available commands");
+                    console_error_with_hint("Command not found", line);
+                    console_write("  Type 'help' for available commands\n");
                 }
             }
             /* Add non-empty commands to history */

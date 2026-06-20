@@ -204,7 +204,11 @@ void check_signals(void) {
             return;
         }
 
-        /* Write trampoline code at new_rsp + 8 */
+        /* Write trampoline code at new_rsp + 8.
+         * Temporarily disable SMAP via STAC to allow kernel access
+         * to user-space stack for signal frame setup. */
+        asm volatile ("stac" ::: "memory");
+
         uint8_t *tramp = (uint8_t *)(uintptr_t)(new_rsp + 8);
         tramp[0] = 0xB8;                        /* mov eax, imm32 */
         {
@@ -251,6 +255,9 @@ void check_signals(void) {
         current_tf->rip = (uint64_t)(uintptr_t)handler;
         current_tf->rsp = new_rsp;
         current_tf->rdi = (uint64_t)s;  /* arg0 = signo */
+
+        /* Re-enable SMAP via CLAC — user-space writes are done */
+        asm volatile ("clac" ::: "memory");
 
         /* Block the signal during handler execution */
         sig->blocked |= (1U << s);

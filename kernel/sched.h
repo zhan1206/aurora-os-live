@@ -171,5 +171,6 @@ void fd_close_all(struct task_struct *t);
 extern struct task_struct *current;
 extern struct run_queue per_cpu_rq[MAX_CPUS];
 extern uint64_t min_vruntime;  /* minimum virtual runtime across all tasks */
+extern int smp_sched_ready;    /* set to 1 after smp_init configures GS */
 
 #endif /* SCHED_H */

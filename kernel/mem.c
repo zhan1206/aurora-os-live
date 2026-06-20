@@ -503,14 +503,11 @@ void phys_mem_init_uefi(void *bi_raw) {
     if (heap_end_pfn > total_phys_pages) heap_end_pfn = total_phys_pages;
     buddy_mark_reserved(heap_start_pfn, heap_end_pfn);
 
-    /* Mark remaining pages as available.
-     * buddy_mark_available skips RESERVED pages, so kernel+heap
-     * pages won't be added to free lists. */
-    buddy_mark_available(kernel_reserved_pages, total_phys_pages);
-
-    /* Also mark conventional memory that was already processed.
-     * Since buddy_mark_available skips reserved pages, we need to
-     * explicitly mark the conventional memory regions as free. */
+    /* Mark conventional memory regions as available based on the
+     * UEFI memory map. We do NOT do a blanket mark_available first,
+     * because that would incorrectly add non-Conventional pages
+     * (ACPI, MMIO, reserved) to the free lists, causing double-counting
+     * and potential buddy list corruption. */
     for (uint32_t i = 0; i < bi->mmap_num_entries; i++) {
         uint64_t start = bi->mmap[i].phys_start;
         uint64_t end   = start + bi->mmap[i].num_pages * PAGE_SIZE;

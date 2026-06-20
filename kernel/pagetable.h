@@ -42,6 +42,11 @@
  * phys_to_virt validates that a physical address is within this range. */
 #define KERNEL_PHYS_MAX  (0x40000000ULL)  /* 1GB identity-mapped */
 
+/* Convert physical address to kernel virtual address.
+ * Physical addresses in the identity-mapped range (0..1GB) are
+ * directly accessible as virtual addresses. */
+uint64_t *phys_to_virt(uint64_t pa);
+
 /* Physical address mask for PTE (bits 12-51) */
 #define PTE_ADDR_MASK  0x000FFFFFFFFFF000ULL
 
