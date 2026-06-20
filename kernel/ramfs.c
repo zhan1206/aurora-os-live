@@ -9,7 +9,6 @@
 struct ramfs_node {
     struct inode      inode;
     struct ramfs_node *next;   /* linked list of directory entries */
-    size_t            size;
     char             *data;
 };
 
@@ -27,9 +26,9 @@ static ssize_t ramfs_read(struct file *filp, void *buf, size_t count,
                           off_t *offset) {
     struct ramfs_node *n = (struct ramfs_node *)filp->inode;
     if (!n || !buf) return -1;
-    if (*offset >= (off_t)n->size) return 0;
+    if (*offset >= (off_t)n->inode.size) return 0;
     size_t toread = count;
-    if ((size_t)(*offset) + toread > n->size) toread = n->size - (*offset);
+    if ((size_t)(*offset) + toread > n->inode.size) toread = n->inode.size - (*offset);
     memcpy(buf, n->data + (*offset), toread);
     *offset += toread;
     return toread;
@@ -68,15 +67,15 @@ static ssize_t ramfs_write(struct file *filp, const void *buf, size_t count,
     if (!n || !buf || !offset) return -1;
 
     size_t new_size = (size_t)(*offset) + count;
-    if (new_size > n->size) {
+    if (new_size > n->inode.size) {
         /* Expand buffer */
         char *new_data = (char *)kmalloc(new_size);
         if (!new_data) return -1;
-        if (n->data && n->size > 0)
-            memcpy(new_data, n->data, n->size);
+        if (n->data && n->inode.size > 0)
+            memcpy(new_data, n->data, n->inode.size);
         if (n->data) kfree(n->data);
         n->data = new_data;
-        n->size = new_size;
+        n->inode.size = new_size;
     }
     memcpy(n->data + (*offset), buf, count);
     *offset += (off_t)count;
@@ -145,11 +144,11 @@ int ramfs_add_file(const char *name, const char *content) {
     if (!n->inode.name) { kfree(n); return -1; }
     strcpy((char *)n->inode.name, name);
 
-    n->size = strlen(content);
-    n->data = (char *)kmalloc(n->size + 1);
+    n->inode.size = strlen(content);
+    n->data = (char *)kmalloc(n->inode.size + 1);
     if (!n->data) { kfree((void *)n->inode.name); kfree(n); return -1; }
-    memcpy(n->data, content, n->size);
-    n->data[n->size] = '\0';
+    memcpy(n->data, content, n->inode.size);
+    n->data[n->inode.size] = '\0';
 
     n->inode.ops    = &ramfs_file_ops;
     n->inode.is_dir = 0;
@@ -183,7 +182,7 @@ int ramfs_add_file_data(const char *name, const void *data, size_t size) {
     if (!n->inode.name) { kfree(n); return -1; }
     strcpy((char *)n->inode.name, name);
 
-    n->size = size;
+    n->inode.size = size;
     n->data = (char *)kmalloc(size);
     if (!n->data) { kfree((void *)n->inode.name); kfree(n); return -1; }
     memcpy(n->data, data, size);

@@ -646,21 +646,10 @@ static void do_ls(void) {
             console_write(d->inode->is_dir ? "DIR " : "FILE");
             console_write_ansi(SGR_RESET);
 
-            /* Size: read from ramfs inode if available */
+            /* Size: read from inode size field */
             console_write("     ");
-            if (!d->inode->is_dir && d->inode->priv) {
-                /* ramfs_node has size field at offset sizeof(struct inode) */
-                extern void *get_inode_priv_sz(struct inode *ino);
-                size_t fsize = 0;
-                /* Access ramfs_node size through the inode's private data */
-                struct ramfs_node_probe {
-                    char pad[0];  /* inode fields */
-                    void *next;
-                    size_t size;
-                    char *data;
-                };
-                struct ramfs_node_probe *rn = (struct ramfs_node_probe *)d->inode;
-                fsize = rn->size;
+            if (!d->inode->is_dir && d->inode->size > 0) {
+                size_t fsize = d->inode->size;
                 if (fsize < 1024) {
                     print_int((int)fsize);
                     console_write(" B");
@@ -1101,7 +1090,16 @@ static void do_a11y(const char *args) {
  * Lock screen command (§7.3) — fixed to yield instead of blocking
  * ================================================================ */
 static void do_lock(void) {
-    console_draw_lock_screen("14:30", "2026-06-19  Friday");
+    char time_str[16];
+    char date_str[48];
+
+    if (rtc_format_time(time_str, sizeof(time_str)) == 0 &&
+        rtc_format_date(date_str, sizeof(date_str)) == 0) {
+        console_draw_lock_screen(time_str, date_str);
+    } else {
+        console_draw_lock_screen("--:--", "RTC unavailable");
+    }
+
     /* Wait for input by yielding — non-blocking poll loop */
     for (;;) {
         char dummy[2];
@@ -1209,17 +1207,35 @@ static void do_exit_cmd(const char *args) {
 static void do_login(void) {
     char line[256];
 
+    /* Read RTC for real-time display */
+    char time_str[16];
+    char date_str[48];
+
+    if (rtc_format_time(time_str, sizeof(time_str)) != 0) {
+        time_str[0] = '1'; time_str[1] = '4'; time_str[2] = ':';
+        time_str[3] = '3'; time_str[4] = '0'; time_str[5] = '\0';
+    }
+    if (rtc_format_date(date_str, sizeof(date_str)) != 0) {
+        date_str[0] = '2'; date_str[1] = '0'; date_str[2] = '2'; date_str[3] = '6';
+        date_str[4] = '-'; date_str[5] = '0'; date_str[6] = '6';
+        date_str[7] = '-'; date_str[8] = '1'; date_str[9] = '9';
+        date_str[10] = ' '; date_str[11] = ' ';
+        date_str[12] = 'F'; date_str[13] = 'r'; date_str[14] = 'i';
+        date_str[15] = 'd'; date_str[16] = 'a'; date_str[17] = 'y';
+        date_str[18] = '\0';
+    }
+
     console_vcenter(10);
 
     /* Time display (large, centered) */
     console_write_ansi(LOGIN_TIME_FG);
-    console_write_centered("14:30");
+    console_write_centered(time_str);
     console_write_ansi(SGR_RESET);
     console_putc('\n');
 
     /* Date */
     console_write_ansi(LOGIN_DATE_FG);
-    console_write_centered("2026-06-19  Friday");
+    console_write_centered(date_str);
     console_write_ansi(SGR_RESET);
     console_putc('\n');
 
@@ -1288,43 +1304,28 @@ static void do_date_cmd(const char *args) {
     (void)args;
     struct rtc_time tm;
     if (rtc_read_time(&tm) == 0) {
-        const char *days[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
-        /* Simple day-of-week calculation (Zeller-like for simplicity) */
-        int m = tm.month, y = tm.year;
-        if (m < 3) { m += 12; y -= 1; }
-        int k = y % 100;
-        int j = y / 100;
-        int dow = (tm.day + (13 * (m + 1)) / 5 + k + k / 4 + j / 4 + 5 * j) % 7;
-        if (dow < 0) dow += 7;
-        /* Zeller's: 0=Sat,1=Sun,...,6=Fri. Map to days[0]=Sun */
-        int dow_idx = (dow + 1) % 7;
-
-        console_write_ansi(SHELL_CMD_OK);
-        char buf[64];
-        int n = 0;
-        /* Format: 2026-06-19 Thu 14:30:45 */
-        n += itoa((int)tm.year, buf, sizeof(buf));
-        buf[n++] = '-';
-        if (tm.month < 10) buf[n++] = '0';
-        n += itoa(tm.month, buf + n, sizeof(buf) - (size_t)n);
-        buf[n++] = '-';
-        if (tm.day < 10) buf[n++] = '0';
-        n += itoa(tm.day, buf + n, sizeof(buf) - (size_t)n);
-        buf[n++] = ' ';
-        for (int i = 0; i < 3 && days[dow_idx][i]; i++) buf[n++] = days[dow_idx][i];
-        buf[n++] = ' ';
-        if (tm.hour < 10) buf[n++] = '0';
-        n += itoa(tm.hour, buf + n, sizeof(buf) - (size_t)n);
-        buf[n++] = ':';
-        if (tm.minute < 10) buf[n++] = '0';
-        n += itoa(tm.minute, buf + n, sizeof(buf) - (size_t)n);
-        buf[n++] = ':';
-        if (tm.second < 10) buf[n++] = '0';
-        n += itoa(tm.second, buf + n, sizeof(buf) - (size_t)n);
-        buf[n] = '\0';
-        console_write(buf);
-        console_write_ansi(SGR_RESET);
-        console_putc('\n');
+        /* Use rtc_format_date for the date portion and rtc_format_time for time */
+        char date_str[48];
+        char time_str[16];
+        if (rtc_format_date(date_str, sizeof(date_str)) == 0 &&
+            rtc_format_time(time_str, sizeof(time_str)) == 0) {
+            console_write_ansi(SHELL_CMD_OK);
+            console_write(date_str);
+            console_write("  ");
+            console_write(time_str);
+            /* Append seconds */
+            char sec_buf[4];
+            if (tm.second < 10) { sec_buf[0] = ':'; sec_buf[1] = '0'; itoa(tm.second, sec_buf + 2, 2); }
+            else { sec_buf[0] = ':'; itoa(tm.second, sec_buf + 1, 3); }
+            console_write(sec_buf);
+            console_write_ansi(SGR_RESET);
+            console_putc('\n');
+        } else {
+            console_write_ansi(SHELL_CMD_WARN);
+            console_write("2026-06-19  Friday  (RTC not available)");
+            console_write_ansi(SGR_RESET);
+            console_putc('\n');
+        }
     } else {
         console_write_ansi(SHELL_CMD_WARN);
         console_write("2026-06-19  Friday  (RTC not available)");
@@ -1458,13 +1459,12 @@ static void do_welcome_cmd(const char *args) {
  * ================================================================ */
 
 static void do_uname(const char *args) {
-    (void)args;
     console_write_ansi(CLR_INFO);
     console_write("AuroraOS ");
     console_write_ansi(SGR_RESET);
     /* Check for -a flag */
     while (*args == ' ') args++;
-    if (args && strcmp(args, "-a") == 0) {
+    if (*args && strcmp(args, "-a") == 0) {
         console_write("AuroraOS aurora 3.2.0 #1 SMP 2026-06-20 x86_64\n");
     } else {
         console_write("AuroraOS\n");
@@ -1750,7 +1750,8 @@ static void do_mkdir(const char *args) {
     }
     memset(new_inode, 0, sizeof(*new_inode));
     new_inode->is_dir = 1;
-    new_inode->name = new_dentry->name;
+    /* Do NOT set inode->name = dentry->name to avoid double-free on eviction.
+     * The dentry owns the name; the inode uses it via the dentry back-pointer. */
     new_dentry->inode = new_inode;
 
     /* Add to root dentry children */
@@ -2021,7 +2022,7 @@ static cmd_func_t cmd_find(const char *name, const char **args) {
 /* Parse a single command segment from the pipeline.
  * Extracts the command name and arguments, and detects redirections.
  * Returns the command string (without redirection operators),
- * and sets *outfile/*infile if redirection is present. */
+ * and sets outfile and infile if redirection is present. */
 static int parse_segment(const char *segment, char *cmd_out, size_t cmd_size,
                          char *outfile, size_t outfile_size,
                          char *infile, size_t infile_size,
@@ -2153,7 +2154,6 @@ static int run_pipeline(const char *line) {
     char infiles[4][128];
     int append_flags[4];
     int bg_flags[4];
-    int seg_lens[4];
     int seg_count = 0;
 
     const char *p = line;
@@ -2169,7 +2169,7 @@ static int run_pipeline(const char *line) {
         memcpy(seg_buf, start, seg_len);
         seg_buf[seg_len] = '\0';
 
-        seg_lens[seg_count] = parse_segment(seg_buf, segments[seg_count],
+        (void)parse_segment(seg_buf, segments[seg_count],
             sizeof(segments[seg_count]), outfiles[seg_count],
             sizeof(outfiles[seg_count]), infiles[seg_count],
             sizeof(infiles[seg_count]), &append_flags[seg_count],

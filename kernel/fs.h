@@ -29,6 +29,7 @@ struct inode {
     struct file_ops *ops;    /* operations table */
     struct dentry   *dentry; /* back-pointer to dentry (may be NULL for root) */
     int              is_dir; /* 1 if this inode represents a directory */
+    size_t           size;   /* file size in bytes (0 for directories) */
 };
 
 /* Dentry: directory entry cache */

@@ -385,7 +385,7 @@ static long wrap_sys_pipe(int *fds) {
  * trapframe, so the child resumes at the same user-space instruction
  * (right after the fork syscall) with the same register state.
  */
-static long sys_fork(void) {
+long sys_fork(void) {
     uint64_t child_cr3 = clone_current_pml4();
     if (child_cr3 == get_kernel_cr3()) { current->t_errno = ENOMEM; return -1; }
 

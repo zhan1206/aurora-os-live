@@ -19,6 +19,15 @@
 - README.md: 更新代码行数（~8,500）、测试数量（20个）、版本号（v3.2.0）
 - 所有关键函数添加了自研声明和详细的文档注释
 
+### 编译修复
+- **rtc.h size_t 未定义**: 添加 `#include <stddef.h>` 解决 `size_t` 类型未定义编译错误
+- **rtc.c itoa 链接错误**: 移除 `extern int itoa` 声明，改为 `#include "include/kstdio.h"` 使用 static inline 版本
+- **selftest.c 类型警告**: 将 `char buf[32]` 改为 `unsigned char buf[32]`，消除 `-Wtype-limits` 和 `-Wpointer-sign` 警告
+- **shell.c 注释警告**: 修复 `/*` 出现在注释中导致的 `-Wcomment` 警告
+- **shell.c 未使用变量**: 移除 `seg_lens` 未使用变量，消除 `-Wunused-but-set-variable` 警告
+- **sys_fork 链接错误**: 将 `sys_fork` 从 `static` 改为公开函数，在 `syscall.h` 中添加声明，修复 shell 管道功能链接错误
+- **构建状态**: 零错误零警告编译通过，ISO 构建成功，QEMU 串行输出验证内核正常启动
+
 ---
 ## v3.0.4 (2026-06-20) — CoolPotOS-Inspired Performance & Security Optimizations
 

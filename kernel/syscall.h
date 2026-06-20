@@ -57,4 +57,7 @@ void syscall_init(void);
 /* System call implementations (from pipe.c) */
 int sys_pipe(int *fds);
 
+/* System call implementations (from syscall.c) */
+long sys_fork(void);
+
 #endif /* SYSCALL_H */

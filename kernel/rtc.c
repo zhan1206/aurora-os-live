@@ -17,6 +17,7 @@
 #include "rtc.h"
 #include "include/portio.h"
 #include "include/log.h"
+#include "include/kstdio.h"
 #include <stdint.h>
 
 /* RTC I/O ports */
@@ -119,4 +120,61 @@ void rtc_tick_update(void) {
         tick_counter = 0;
         g_uptime_seconds++;
     }
+}
+
+/* ================================================================
+ * rtc_format_time: Format current time as "HH:MM"
+ *
+ * Used by shell's lock/login screens to avoid duplicate formatting
+ * code. Uses stack buffer and itoa for efficient conversion.
+ * ================================================================ */
+int rtc_format_time(char *buf, size_t bufsize) {
+    if (!buf || bufsize < 6) return -1;
+    struct rtc_time tm;
+    if (rtc_read_time(&tm) != 0) return -1;
+
+    int n = 0;
+    if (tm.hour < 10) buf[n++] = '0';
+    n += itoa(tm.hour, buf + n, bufsize - (size_t)n);
+    buf[n++] = ':';
+    if (tm.minute < 10) buf[n++] = '0';
+    n += itoa(tm.minute, buf + n, bufsize - (size_t)n);
+    buf[n] = '\0';
+    return 0;
+}
+
+/* ================================================================
+ * rtc_format_date: Format current date as "YYYY-MM-DD  DayOfWeek"
+ *
+ * Uses Zeller's formula for day-of-week calculation.
+ * Day names: Sun, Mon, Tue, Wed, Thu, Fri, Sat.
+ * ================================================================ */
+int rtc_format_date(char *buf, size_t bufsize) {
+    if (!buf || bufsize < 32) return -1;
+    struct rtc_time tm;
+    if (rtc_read_time(&tm) != 0) return -1;
+
+    const char *days[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
+
+    /* Zeller's formula for day of week */
+    int m = tm.month, y = tm.year;
+    if (m < 3) { m += 12; y -= 1; }
+    int k = y % 100, j = y / 100;
+    int dow = (tm.day + (13 * (m + 1)) / 5 + k + k / 4 + j / 4 + 5 * j) % 7;
+    if (dow < 0) dow += 7;
+    int dow_idx = (dow + 1) % 7;  /* Zeller: 0=Sat→days[0]=Sun */
+
+    int n = 0;
+    n += itoa(tm.year, buf + n, bufsize - (size_t)n);
+    buf[n++] = '-';
+    if (tm.month < 10) buf[n++] = '0';
+    n += itoa(tm.month, buf + n, bufsize - (size_t)n);
+    buf[n++] = '-';
+    if (tm.day < 10) buf[n++] = '0';
+    n += itoa(tm.day, buf + n, bufsize - (size_t)n);
+    buf[n++] = ' ';
+    buf[n++] = ' ';
+    for (int i = 0; i < 3 && days[dow_idx][i]; i++) buf[n++] = days[dow_idx][i];
+    buf[n] = '\0';
+    return 0;
 }
