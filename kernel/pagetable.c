@@ -15,6 +15,11 @@
  *     on a present, read-only, user page with ref_count > 1,
  *     allocates a new page, copies content, updates PTE to RW.
  *     (This replaces the old pf_handler_c which just panicked.)
+ *
+ *   - SMAP/SMEP: Enables Supervisor Mode Access Prevention (SMAP)
+ *     and Supervisor Mode Execution Prevention (SMEP) via CR4 bits.
+ *     These are temporarily disabled during copy_to_user/copy_from_user
+ *     via STAC/CLAC instructions (CoolPotOS-inspired security hardening).
  */
 
 #include "pagetable.h"
@@ -70,6 +75,29 @@ void page_table_init(void) {
         asm volatile ("wrmsr" :: "a"((uint32_t)efer), "d"((uint32_t)(efer >> 32)),
                       "c"(0xC0000080));
         log_printf(LOG_LEVEL_INFO, "pagetable: EFER.NXE enabled\n");
+    }
+
+    /*
+     * Enable SMEP (Supervisor Mode Execution Prevention) and SMAP
+     * (Supervisor Mode Access Prevention) via CR4 bits.
+     *
+     * SMEP (CR4 bit 20): Prevents kernel from executing code in
+     *   user-accessible pages. Mitigates ret2usr attacks.
+     * SMAP (CR4 bit 21): Prevents kernel from accessing user-accessible
+     *   data pages. Can be temporarily disabled via STAC/CLAC.
+     *
+     * CoolPotOS-inspired security hardening.
+     */
+    uint64_t cr4;
+    asm volatile ("mov %%cr4, %0" : "=r"(cr4));
+    int smep_enabled = (cr4 & (1ULL << 20)) != 0;
+    int smap_enabled = (cr4 & (1ULL << 21)) != 0;
+
+    if (!smep_enabled || !smap_enabled) {
+        cr4 |= (1ULL << 20) | (1ULL << 21);
+        asm volatile ("mov %0, %%cr4" :: "r"(cr4) : "memory");
+        if (!smep_enabled) log_printf(LOG_LEVEL_INFO, "pagetable: SMEP enabled\n");
+        if (!smap_enabled) log_printf(LOG_LEVEL_INFO, "pagetable: SMAP enabled\n");
     }
 }
 

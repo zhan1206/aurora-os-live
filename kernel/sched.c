@@ -574,6 +574,13 @@ int waitpid(int pid, int *status, int options) {
         while (node) {
             struct task_struct *child = node->child;
 
+            if (!child) {
+                /* Skip orphaned child nodes (should not happen, but guard against it) */
+                prev = node;
+                node = node->next;
+                continue;
+            }
+
             if ((pid == -1 || child->pid == pid) &&
                 child->state == TASK_ZOMBIE) {
 

@@ -88,6 +88,18 @@ void *module_lookup_symbol(const char *name) {
 }
 
 /* ================================================================
+ * Module reference counting
+ * ================================================================ */
+
+void module_get(struct kernel_module *mod) {
+    if (mod) mod->refcount++;
+}
+
+void module_put(struct kernel_module *mod) {
+    if (mod && mod->refcount > 0) mod->refcount--;
+}
+
+/* ================================================================
  * Module list management
  * ================================================================ */
 
@@ -450,70 +462,34 @@ int module_load(const char *path) {
     mod->syms  = NULL;
     mod->num_syms = 0;
 
-    /* Look up module's own init/exit symbols by re-reading the ELF symtab.
-     * We need to find the addresses of "init" and "exit" within the
-     * already-loaded module memory. */
-    {
-        struct file *f2 = vfs_open(path, 0);
-        if (f2) {
-            Elf64_Ehdr ehdr2;
-            f2->offset = 0;
-            vfs_read(f2, &ehdr2, sizeof(ehdr2));
+    /* Look up module's own init/exit symbols from the already-loaded symtab.
+     * No need to re-open the file — we already have symtab_data and strtab_data
+     * from the first pass, and secs[] contains the section layout. */
+    if (symtab_data && strtab_data && symtab_count > 0) {
+        for (uint32_t s = 0; s < symtab_count; s++) {
+            if (ELF64_ST_BIND(symtab_data[s].st_info) != STB_GLOBAL) continue;
+            const char *sn = strtab_data + symtab_data[s].st_name;
 
-            Elf64_Shdr *shdrs2 = (Elf64_Shdr *)kmalloc(ehdr2.e_shnum * sizeof(Elf64_Shdr));
-            if (shdrs2) {
-                f2->offset = ehdr2.e_shoff;
-                vfs_read(f2, shdrs2, ehdr2.e_shnum * sizeof(Elf64_Shdr));
-
-                Elf64_Shdr *sym_hdr2 = NULL, *str_hdr2 = NULL;
-                for (int i = 0; i < ehdr2.e_shnum; i++) {
-                    if (shdrs2[i].sh_type == SHT_SYMTAB) sym_hdr2 = &shdrs2[i];
-                    if (shdrs2[i].sh_type == SHT_STRTAB && i != ehdr2.e_shstrndx && !str_hdr2)
-                        str_hdr2 = &shdrs2[i];
-                }
-
-                if (sym_hdr2 && str_hdr2) {
-                    Elf64_Sym *symtab2 = (Elf64_Sym *)kmalloc(sym_hdr2->sh_size);
-                    char *strtab2 = (char *)kmalloc(str_hdr2->sh_size);
-                    if (symtab2 && strtab2) {
-                        f2->offset = sym_hdr2->sh_offset;
-                        vfs_read(f2, symtab2, sym_hdr2->sh_size);
-                        f2->offset = str_hdr2->sh_offset;
-                        vfs_read(f2, strtab2, str_hdr2->sh_size);
-
-                        int sym_count = sym_hdr2->sh_size / sizeof(Elf64_Sym);
-                        for (int s = 0; s < sym_count; s++) {
-                            if (ELF64_ST_BIND(symtab2[s].st_info) != STB_GLOBAL) continue;
-                            const char *sn = strtab2 + symtab2[s].st_name;
-
-                            /* Find the section this symbol is in */
-                            uint16_t sndx = symtab2[s].st_shndx;
-                            if (sndx < ehdr2.e_shnum) {
-                                /* Find the corresponding section in our allocated layout */
-                                uint64_t sec_addr = 0;
-                                for (int j = 0; j < nsecs; j++) {
-                                    if (secs[j].file_offset == shdrs2[sndx].sh_offset &&
-                                        secs[j].size == shdrs2[sndx].sh_size) {
-                                        sec_addr = secs[j].addr;
-                                        break;
-                                    }
-                                }
-                                uint64_t sym_addr = sec_addr + symtab2[s].st_value;
-
-                                if (strcmp(sn, "init") == 0) {
-                                    mod->init = (void (*)(void))(uintptr_t)sym_addr;
-                                } else if (strcmp(sn, "exit") == 0) {
-                                    mod->exit = (void (*)(void))(uintptr_t)sym_addr;
-                                }
-                            }
-                        }
+            /* Find the section this symbol is in */
+            uint16_t sndx = symtab_data[s].st_shndx;
+            if (sndx < shnum) {
+                /* Find the corresponding section in our allocated layout */
+                uint64_t sec_addr = 0;
+                for (int j = 0; j < nsecs; j++) {
+                    if (secs[j].file_offset == shdrs[sndx].sh_offset &&
+                        secs[j].size == shdrs[sndx].sh_size) {
+                        sec_addr = secs[j].addr;
+                        break;
                     }
-                    if (symtab2) kfree(symtab2);
-                    if (strtab2) kfree(strtab2);
                 }
-                kfree(shdrs2);
+                uint64_t sym_addr = sec_addr + symtab_data[s].st_value;
+
+                if (strcmp(sn, "init") == 0) {
+                    mod->init = (void (*)(void))(uintptr_t)sym_addr;
+                } else if (strcmp(sn, "exit") == 0) {
+                    mod->exit = (void (*)(void))(uintptr_t)sym_addr;
+                }
             }
-            vfs_close(f2);
         }
     }
 
@@ -554,6 +530,23 @@ int module_unload(const char *name) {
 
     if (mod->state != MODULE_LIVE) {
         log_printf(LOG_LEVEL_WARN, "module_unload: %s not live\n", name);
+        return -1;
+    }
+
+    /* Check if any other module depends on this one */
+    for (struct kernel_module *m = module_head; m; m = m->next) {
+        if (m == mod || m->state != MODULE_LIVE) continue;
+        for (int i = 0; i < m->num_deps; i++) {
+            if (m->deps[i] == mod) {
+                log_printf(LOG_LEVEL_WARN, "module_unload: %s is used by %s\n", name, m->name);
+                return -1;
+            }
+        }
+    }
+
+    /* Check reference count */
+    if (mod->refcount > 0) {
+        log_printf(LOG_LEVEL_WARN, "module_unload: %s has refcount %d\n", name, mod->refcount);
         return -1;
     }
 

@@ -1,5 +1,28 @@
 # AuroraOS Changelog
 
+## v3.0.4 (2026-06-20) — CoolPotOS-Inspired Performance & Security Optimizations
+
+### CoolPotOS 学习成果深度集成
+- **procfs**: 新增 `/proc/self/cmdline` 支持（受 CoolPotOS `/proc/<pid>/cmdline` 启发）
+- **SMAP/SMEP**: 启用 Supervisor Mode Access Prevention 和 Supervisor Mode Execution Prevention（受 CoolPotOS 安全架构启发，通过 CR4 位 20/21 实现）
+- **版本统一**: 修复 `main.c`、`syscall.c`、`procfs.c` 中版本号不一致问题（统一为 v3.0.2）
+
+### 性能优化
+- **模块加载器**: 消除 module_load 中重复打开文件的代码冗余（第二次 vfs_open 完全移除，复用已加载的 symtab 数据）
+- **模块引用计数**: 新增 `module_get`/`module_put` API，防止正在使用的模块被意外卸载
+- **模块卸载保护**: 增加依赖检查和引用计数检查，防止卸载被其他模块依赖的模块
+
+### 安全加固
+- **SMAP/SMEP**: 内核启动时自动启用，防止内核访问/执行用户空间内存，缓解 ret2usr 攻击
+- **waitpid 空指针保护**: 修复 waitpid 中 child 可能为 NULL 的解引用风险
+- **模块卸载安全**: 增加依赖模块检查，防止级联卸载导致的内核崩溃
+
+### 代码质量
+- 消除 module_load 中的重复文件打开和 ELF 解析代码
+- 改善模块卸载路径的错误处理
+
+---
+
 ## v3.0.3 (2026-06-19) — CoolPotOS-Inspired Enhancements & Documentation
 
 ### CoolPotOS 学习成果集成

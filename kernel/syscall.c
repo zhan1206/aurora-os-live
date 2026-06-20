@@ -456,7 +456,7 @@ static long sys_uname(struct utsname *buf) {
     memset(&u, 0, sizeof(u));
     strcpy(u.sysname, "AuroraOS");
     strcpy(u.nodename, "aurora");
-    strcpy(u.release, "2.3.0");
+    strcpy(u.release, "3.0.2");
     strcpy(u.version, "#1 SMP 2026-06-19");
     strcpy(u.machine, "x86_64");
     if (copy_to_user(buf, &u, sizeof(u)) != 0) {

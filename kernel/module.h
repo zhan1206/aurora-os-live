@@ -32,6 +32,7 @@ struct kernel_module {
     void         *base;        /* base address of module memory */
     size_t         size;       /* total allocated size */
     int            state;      /* MODULE_* */
+    int            refcount;   /* reference count (prevents premature unload) */
 
     void         (*init)(void);  /* constructor */
     void         (*exit)(void);  /* destructor */
@@ -71,5 +72,11 @@ int module_register_symbol(const char *name, void *addr);
 
 /* Look up a symbol in the kernel + module symbol tables. */
 void *module_lookup_symbol(const char *name);
+
+/* Increment module reference count (prevents unload). */
+void module_get(struct kernel_module *mod);
+
+/* Decrement module reference count. */
+void module_put(struct kernel_module *mod);
 
 #endif /* MODULE_H */

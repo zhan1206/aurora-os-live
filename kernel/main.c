@@ -36,7 +36,7 @@ int g_theme_mode      = THEME_DARK;
 int g_reduced_motion  = 0;
 int g_anim_enabled    = 1;
 
-#define AURORA_VERSION  "AuroraOS v2.3.0"
+#define AURORA_VERSION  "AuroraOS v3.0.2"
 #define AURORA_BUILD    "2026-06-19 08:00"
 #define AURORA_COPY     "(c) 2026 AuroraOS Contributors — MIT License"
 

@@ -8,6 +8,8 @@
  *   /proc/version    - Kernel version string
  *   /proc/mounts     - List of mounted filesystems
  *   /proc/self/stat  - Current process PID and state
+ *   /proc/self/maps  - Current process memory map (CoolPotOS-inspired)
+ *   /proc/self/cmdline - Current process command line (CoolPotOS-inspired)
  *   /proc/interrupts - IRQ vector counts per CPU (CoolPotOS-inspired)
  *   /proc/filesystems- Supported filesystem types
  *   /proc/cmdline    - Kernel command line
@@ -24,6 +26,7 @@
 #include "sched.h"
 #include "perf.h"
 #include "mem.h"
+#include "pagetable.h"
 #include "include/log.h"
 #include "include/kstdio.h"
 #include <string.h>
@@ -48,6 +51,11 @@ static struct file_ops procfs_file_ops;
 static struct file_ops procfs_dir_ops;
 static int procfs_lookup(struct inode *dir, struct dentry *dentry);
 static int procfs_self_lookup(struct inode *dir, struct dentry *dentry);
+static int read_self_maps(char *buf, size_t size);
+static int read_self_stat(char *buf, size_t size);
+static int read_self_cmdline(char *buf, size_t size);
+static int output_region(char *buf, size_t size, uint64_t start, uint64_t end, int flags);
+static int u64toa_hex_append(char *buf, size_t size, uint64_t val);
 
 /* ================================================================
  * Helper: append functions for building strings
@@ -236,6 +244,195 @@ static int read_mounts(char *buf, size_t size) {
 }
 
 /*
+ * read_self_cmdline: Returns the command line of the current process.
+ * Inspired by CoolPotOS's /proc/<pid>/cmdline.
+ */
+static int read_self_cmdline(char *buf, size_t size) {
+    if (size < 64) return -1;
+    if (!current) return -1;
+
+    int len = 0;
+    /* Use the process name as the command line for now.
+     * In a full implementation, this would return the argv array
+     * passed to execve(). */
+    for (char *p = current->name; *p && len < (int)size - 1; p++)
+        buf[len++] = *p;
+    if (len < (int)size - 1) buf[len++] = '\n';
+
+    if (len >= (int)size) len = (int)size - 1;
+    buf[len] = '\0';
+    return len;
+}
+
+/*
+ * read_self_maps: Returns the memory map of the current process.
+ * Walks the page table to find all mapped regions and their permissions.
+ * Inspired by CoolPotOS's /proc/<pid>/maps.
+ */
+static int read_self_maps(char *buf, size_t size) {
+    if (size < 512) return -1;
+    if (!current) return -1;
+
+    int len = 0;
+    uint64_t *pml4 = (uint64_t *)(uintptr_t)current->cr3;
+
+    /* Walk the page table to find contiguous mapped regions */
+    uint64_t region_start = 0;
+    uint64_t region_end = 0;
+    int region_flags = -1;
+    int in_region = 0;
+
+    for (uint64_t va = 0; va < 0x0000800000000000ULL; va += PAGE_SIZE) {
+        /* Skip kernel space */
+        if (va >= 0x0000800000000000ULL) break;
+
+        uint64_t pml4_idx = (va >> 39) & 0x1FF;
+        if (!(pml4[pml4_idx] & PTE_PRESENT)) {
+            /* Skip the entire 512GB region */
+            va += (1ULL << 39) - PAGE_SIZE;
+            continue;
+        }
+
+        uint64_t *pdpt = (uint64_t *)(uintptr_t)(pml4[pml4_idx] & PTE_ADDR_MASK);
+        uint64_t pdpt_idx = (va >> 30) & 0x1FF;
+        if (!(pdpt[pdpt_idx] & PTE_PRESENT)) {
+            va += (1ULL << 30) - PAGE_SIZE;
+            continue;
+        }
+
+        uint64_t *pd = (uint64_t *)(uintptr_t)(pdpt[pdpt_idx] & PTE_ADDR_MASK);
+        uint64_t pd_idx = (va >> 21) & 0x1FF;
+        if (!(pd[pd_idx] & PTE_PRESENT)) {
+            va += (1ULL << 21) - PAGE_SIZE;
+            continue;
+        }
+
+        /* Check if this is a huge page (2MB) */
+        if (pd[pd_idx] & PTE_PS) {
+            uint64_t entry = pd[pd_idx];
+            /* This is a 2MB huge page */
+            if (entry & PTE_PRESENT) {
+                int flags = 4; /* r-- */
+                if (entry & PTE_RW) flags |= 2; /* rw- */
+                if (!(entry & PTE_NX)) flags |= 1; /* rwx */
+
+                if (in_region && flags == region_flags &&
+                    va == region_end) {
+                    region_end = va + (1ULL << 21);
+                } else {
+                    if (in_region) {
+                        /* Output previous region */
+                        len += output_region(buf + len, size - (size_t)len,
+                            region_start, region_end, region_flags);
+                        if (len >= (int)size - 1) goto done;
+                    }
+                    region_start = va;
+                    region_end = va + (1ULL << 21);
+                    region_flags = flags;
+                    in_region = 1;
+                }
+            }
+            va += (1ULL << 21) - PAGE_SIZE;
+            continue;
+        }
+
+        uint64_t *pt = (uint64_t *)(uintptr_t)(pd[pd_idx] & PTE_ADDR_MASK);
+        uint64_t pt_idx = (va >> 12) & 0x1FF;
+
+        if (pt[pt_idx] & PTE_PRESENT) {
+            uint64_t entry = pt[pt_idx];
+            int flags = 4; /* r-- */
+            if (entry & PTE_RW) flags |= 2; /* rw- */
+            if (!(entry & PTE_NX)) flags |= 1; /* rwx */
+
+            if (in_region && flags == region_flags &&
+                va == region_end) {
+                /* Extend current region */
+                region_end = va + PAGE_SIZE;
+            } else {
+                if (in_region) {
+                    /* Output previous region */
+                    len += output_region(buf + len, size - (size_t)len,
+                        region_start, region_end, region_flags);
+                    if (len >= (int)size - 1) goto done;
+                }
+                region_start = va;
+                region_end = va + PAGE_SIZE;
+                region_flags = flags;
+                in_region = 1;
+            }
+        }
+    }
+
+    /* Output the last region */
+    if (in_region) {
+        len += output_region(buf + len, size - (size_t)len,
+            region_start, region_end, region_flags);
+    }
+
+done:
+    if (len >= (int)size) len = (int)size - 1;
+    buf[len] = '\0';
+    return len;
+}
+
+/*
+ * Helper: Output a single memory region line in /proc/self/maps format.
+ * Format: "start-end flags offset dev inode path"
+ */
+static int output_region(char *buf, size_t size,
+                         uint64_t start, uint64_t end, int flags) {
+    if (size < 96) return 0;
+    int len = 0;
+
+    /* Start address */
+    len += u64toa_hex_append(buf + len, size - (size_t)len, start);
+    len += append_str(buf + len, size - (size_t)len, "-");
+    /* End address */
+    len += u64toa_hex_append(buf + len, size - (size_t)len, end);
+    len += append_str(buf + len, size - (size_t)len, " ");
+
+    /* Permissions: rwxp */
+    buf[len++] = (flags & 4) ? 'r' : '-';
+    buf[len++] = (flags & 2) ? 'w' : '-';
+    buf[len++] = (flags & 1) ? 'x' : '-';
+    buf[len++] = 'p';
+    len += append_str(buf + len, size - (size_t)len, " 00000000 00:00 0");
+
+    /* Path hint */
+    if (start >= 0x7FFF00000000ULL) {
+        len += append_str(buf + len, size - (size_t)len, "          [stack]");
+    } else if (start >= 0x60000000ULL && start < 0x70000000ULL) {
+        len += append_str(buf + len, size - (size_t)len, "          [heap]");
+    } else if (start < 0x200000ULL) {
+        len += append_str(buf + len, size - (size_t)len, "          [text]");
+    }
+
+    if (len < (int)size - 1) buf[len++] = '\n';
+    return len;
+}
+
+/*
+ * Helper: Convert uint64_t to hex string and append to buffer.
+ */
+static int u64toa_hex_append(char *buf, size_t size, uint64_t val) {
+    char tmp[17];
+    int tn = 0;
+    if (val == 0) tmp[tn++] = '0';
+    while (val > 0 && tn < 16) {
+        int d = (int)(val & 0xF);
+        tmp[tn++] = (char)(d < 10 ? '0' + d : 'a' + d - 10);
+        val >>= 4;
+    }
+    /* Pad to 16 hex digits */
+    int n = 0;
+    while (tn < 16 && n < (int)size - 1) { buf[n++] = '0'; tn++; }
+    for (int i = tn - 1; i >= 0 && n < (int)size - 1; i--)
+        buf[n++] = tmp[i];
+    return n;
+}
+
+/*
  * read_self_stat: Returns current process PID and state.
  */
 static int read_self_stat(char *buf, size_t size) {
@@ -385,14 +582,21 @@ static ssize_t procfs_read(struct file *filp, void *buf, size_t count,
     if (*offset > 0) return 0;
 
     /* Generate content into a temporary buffer, then copy to user buffer */
-    char tmp[512];
+    char tmp[1024];
     int len = 0;
 
     if (data->type == PROC_INODE_FILE && data->entry && data->entry->read_func) {
         len = data->entry->read_func(tmp, sizeof(tmp));
     } else if (data->type == PROC_INODE_SELF) {
-        /* /proc/self/stat */
-        len = read_self_stat(tmp, sizeof(tmp));
+        /* /proc/self/<name> */
+        if (filp->inode->name && strcmp(filp->inode->name, "maps") == 0) {
+            len = read_self_maps(tmp, sizeof(tmp));
+        } else if (filp->inode->name && strcmp(filp->inode->name, "cmdline") == 0) {
+            len = read_self_cmdline(tmp, sizeof(tmp));
+        } else {
+            /* Default: /proc/self/stat */
+            len = read_self_stat(tmp, sizeof(tmp));
+        }
     } else {
         return 0;
     }
@@ -493,29 +697,39 @@ static int procfs_self_lookup(struct inode *dir, struct dentry *dentry) {
     (void)dir;
     if (!dentry || !dentry->name) return -1;
 
+    /* Helper to create a virtual inode for /proc/self/<name> */
+    #define CREATE_SELF_INODE(fname) do { \
+        struct inode *inode = (struct inode *)kmalloc(sizeof(*inode)); \
+        if (!inode) return -1; \
+        memset(inode, 0, sizeof(*inode)); \
+        struct procfs_inode_data *data = \
+            (struct procfs_inode_data *)kmalloc(sizeof(*data)); \
+        if (!data) { kfree(inode); return -1; } \
+        memset(data, 0, sizeof(*data)); \
+        data->type = PROC_INODE_SELF; \
+        data->entry = NULL; \
+        inode->name = fname; \
+        inode->priv = data; \
+        inode->is_dir = 0; \
+        inode->ops = &procfs_file_ops; \
+        inode->dentry = dentry; \
+        dentry->inode = inode; \
+        return 0; \
+    } while (0)
+
     if (strcmp(dentry->name, "stat") == 0) {
-        /* Create a virtual inode for /proc/self/stat */
-        struct inode *inode = (struct inode *)kmalloc(sizeof(*inode));
-        if (!inode) return -1;
-        memset(inode, 0, sizeof(*inode));
-
-        struct procfs_inode_data *data =
-            (struct procfs_inode_data *)kmalloc(sizeof(*data));
-        if (!data) { kfree(inode); return -1; }
-        memset(data, 0, sizeof(*data));
-
-        data->type = PROC_INODE_SELF;
-        data->entry = NULL;  /* uses read_self_stat directly */
-
-        inode->name = "stat";
-        inode->priv = data;
-        inode->is_dir = 0;
-        inode->ops = &procfs_file_ops;
-        inode->dentry = dentry;
-        dentry->inode = inode;
-        return 0;
+        CREATE_SELF_INODE("stat");
     }
 
+    if (strcmp(dentry->name, "maps") == 0) {
+        CREATE_SELF_INODE("maps");
+    }
+
+    if (strcmp(dentry->name, "cmdline") == 0) {
+        CREATE_SELF_INODE("cmdline");
+    }
+
+    #undef CREATE_SELF_INODE
     return -1;
 }
 

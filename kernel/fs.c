@@ -13,6 +13,7 @@
 #include "ext2.h"
 #include "block_dev.h"
 #include "procfs.h"
+#include "devtmpfs.h"
 
 /* ================================================================
  * fs_init — Initialize VFS, RamFS, embedded files, and launch init
@@ -30,6 +31,9 @@ void fs_init(void) {
 
             /* Mount procfs at /proc */
             procfs_init();
+
+            /* Mount devtmpfs at /dev (CoolPotOS-inspired) */
+            devtmpfs_init();
 
             embed_init();
 
@@ -52,6 +56,9 @@ void fs_init(void) {
 
         /* Mount procfs at /proc */
         procfs_init();
+
+        /* Mount devtmpfs at /dev (CoolPotOS-inspired) */
+        devtmpfs_init();
 
         embed_init();
 

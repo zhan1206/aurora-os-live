@@ -183,6 +183,8 @@ AuroraOS 是一个基于 x86_64 架构的自主研发操作系统内核，采用
 | 栈保护 | `stack_protect.c` | 栈金丝雀保护（`-fstack-protector-strong`） |
 | ASLR | `aslr.c` | 地址空间布局随机化（xorshift64 PRNG，栈/mmap 随机化） |
 | Seccomp | `seccomp.c` | 系统调用访问控制（256 位位图过滤器） |
+| SMAP/SMEP | `pagetable.c` | 内核访问保护（CR4 位 20/21），防止内核访问用户空间内存（CoolPotOS 启发） |
+| 模块签名 | `module_sign.c` | 内核模块完整性验证（HMAC 风格签名） |
 
 ### 3.11 ELF 加载
 
@@ -243,7 +245,7 @@ AuroraOS 是一个基于 x86_64 架构的自主研发操作系统内核，采用
 | 内存模型 | 4 级分页 (PML4) | x86_64 标准，支持 48 位虚拟地址 |
 | 物理内存分配 | Buddy 伙伴系统 | 高效的连续页分配与合并 |
 | 内核堆分配 | Slab 分配器 | 小对象高效分配，减少碎片 |
-| 进程调度 | 轮转调度 (Round Robin) + SMP 工作窃取 | 简单公平，per-CPU 就绪队列，负载均衡 |
+| 进程调度 | VRFair (CFS/EEVDF 启发) + SMP 工作窃取 | 基于 vruntime 的公平调度，per-CPU 就绪队列，负载均衡 |
 | 文件系统 | VFS + RamFS + Ext2 | 抽象层支持多种文件系统，ext2 支持持久化 |
 | 块设备 | block_dev 抽象层 + ramdisk + VirtIO | 统一块设备接口，支持多种后端 |
 | 系统调用 | SYSCALL 指令 (MSR) + seccomp 过滤 | x86_64 快速系统调用标准，256 位位图过滤 |
