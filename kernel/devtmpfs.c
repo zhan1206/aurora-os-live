@@ -102,12 +102,17 @@ static ssize_t dev_zero_write(struct file *filp, const void *buf, size_t count,
 }
 
 /*
- * dev_console_read: Read from console input (not supported for now).
+ * dev_console_read: Read from console input (blocking line read).
  */
 static ssize_t dev_console_read(struct file *filp, void *buf, size_t count,
                                 off_t *offset) {
-    (void)filp; (void)buf; (void)count; (void)offset;
-    return 0;  /* Not implemented */
+    (void)filp; (void)offset;
+    if (!buf || count == 0) return 0;
+
+    /* Block until a line is available from the console */
+    int len = console_getline((char *)buf, count);
+    if (len <= 0) return 0;
+    return (ssize_t)len;
 }
 
 /*

@@ -170,6 +170,10 @@ int  tcp_shutdown(int sock, int how);
 int  udp_recvfrom(uint16_t port, void *buf, int max_len,
                   uint8_t src_ip[4], uint16_t *src_port);
 
+/* Socket name resolution */
+int  tcp_getsockname(int sock, uint8_t local_ip[4], uint16_t *local_port);
+int  tcp_getpeername(int sock, uint8_t remote_ip[4], uint16_t *remote_port);
+
 /* Utility */
 struct net_if *net_get_interface(int index);
 int net_get_interface_count(void);

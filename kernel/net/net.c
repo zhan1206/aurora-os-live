@@ -896,6 +896,32 @@ int tcp_shutdown(int sock, int how) {
     return -1;
 }
 
+int tcp_getsockname(int sock, uint8_t local_ip[4], uint16_t *local_port) {
+    spin_lock(&tcp_lock);
+    struct tcp_socket *s = tcp_find_socket(sock);
+    if (!s) {
+        spin_unlock(&tcp_lock);
+        return -1;
+    }
+    memcpy(local_ip, s->local_ip, 4);
+    *local_port = s->local_port;
+    spin_unlock(&tcp_lock);
+    return 0;
+}
+
+int tcp_getpeername(int sock, uint8_t remote_ip[4], uint16_t *remote_port) {
+    spin_lock(&tcp_lock);
+    struct tcp_socket *s = tcp_find_socket(sock);
+    if (!s) {
+        spin_unlock(&tcp_lock);
+        return -1;
+    }
+    memcpy(remote_ip, s->remote_ip, 4);
+    *remote_port = s->remote_port;
+    spin_unlock(&tcp_lock);
+    return 0;
+}
+
 static struct tcp_socket *tcp_find_listener(uint16_t port) {
     int i;
     for (i = 0; i < MAX_TCP_SOCKETS; i++) {

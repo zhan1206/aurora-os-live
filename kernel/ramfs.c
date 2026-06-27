@@ -131,6 +131,90 @@ static ssize_t ramfs_write(struct file *filp, const void *buf, size_t count,
     return (ssize_t)count;
 }
 
+/*
+ * ramfs_mkdir: Create a directory.
+ */
+static int ramfs_mkdir(struct inode *dir, const char *name) {
+    struct ramfs_node *head = (struct ramfs_node *)dir;
+    if (!head || !head->inode.is_dir || !name) return -1;
+
+    /* Check for duplicate name */
+    struct ramfs_node *existing = head->next;
+    while (existing) {
+        if (existing->inode.name && strcmp(existing->inode.name, name) == 0)
+            return -1;
+        existing = existing->next;
+    }
+
+    struct ramfs_node *n = (struct ramfs_node *)kmalloc(sizeof(*n));
+    if (!n) return -1;
+    memset(n, 0, sizeof(*n));
+
+    n->inode.name = (const char *)kmalloc(strlen(name) + 1);
+    if (!n->inode.name) { kfree(n); return -1; }
+    strcpy((char *)n->inode.name, name);
+
+    n->inode.size   = 0;
+    n->inode.data   = NULL;
+    n->inode.ops    = &ramfs_dir_ops;
+    n->inode.is_dir = 1;
+    n->inode.priv   = NULL;
+
+    /* Insert at head of directory listing */
+    n->next = head->next;
+    head->next = n;
+
+    return 0;
+}
+
+/*
+ * ramfs_unlink: Remove a file (not a directory).
+ */
+static int ramfs_unlink(struct inode *dir, const char *name) {
+    struct ramfs_node *head = (struct ramfs_node *)dir;
+    if (!head || !head->inode.is_dir || !name) return -1;
+
+    struct ramfs_node *prev = head;
+    struct ramfs_node *cur = head->next;
+    while (cur) {
+        if (cur->inode.name && strcmp(cur->inode.name, name) == 0) {
+            if (cur->inode.is_dir) return -1;  /* cannot unlink a directory */
+            prev->next = cur->next;
+            if (cur->inode.name) kfree((void *)cur->inode.name);
+            if (cur->data) kfree(cur->data);
+            kfree(cur);
+            return 0;
+        }
+        prev = cur;
+        cur = cur->next;
+    }
+    return -1;  /* not found */
+}
+
+/*
+ * ramfs_rmdir: Remove an empty directory.
+ */
+static int ramfs_rmdir(struct inode *dir, const char *name) {
+    struct ramfs_node *head = (struct ramfs_node *)dir;
+    if (!head || !head->inode.is_dir || !name) return -1;
+
+    struct ramfs_node *prev = head;
+    struct ramfs_node *cur = head->next;
+    while (cur) {
+        if (cur->inode.name && strcmp(cur->inode.name, name) == 0) {
+            if (!cur->inode.is_dir) return -1;  /* not a directory */
+            if (cur->next) return -1;  /* directory not empty */
+            prev->next = cur->next;
+            if (cur->inode.name) kfree((void *)cur->inode.name);
+            kfree(cur);
+            return 0;
+        }
+        prev = cur;
+        cur = cur->next;
+    }
+    return -1;  /* not found */
+}
+
 static struct file_ops ramfs_file_ops = {
     .open   = ramfs_open,
     .read   = ramfs_read,
@@ -146,6 +230,9 @@ static struct file_ops ramfs_dir_ops = {
     .close  = ramfs_close,
     .lookup = ramfs_lookup,
     .create = ramfs_create,
+    .mkdir  = ramfs_mkdir,
+    .unlink = ramfs_unlink,
+    .rmdir  = ramfs_rmdir,
 };
 
 /* ================================================================

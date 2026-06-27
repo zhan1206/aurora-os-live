@@ -391,13 +391,34 @@ static long sys_mprotect(void *addr, size_t length, int prot) {
  * ================================================================ */
 
 static long sys_execve(const char *path, char *const argv[], char *const envp[]) {
-    (void)argv; (void)envp;
     if (!path || !current) { current->t_errno = EFAULT; return -1; }
     if (!user_addr_range_ok(path, 1)) { current->t_errno = EFAULT; return -1; }
     char kpath[256];
     int len = strncpy_from_user(kpath, path, sizeof(kpath) - 1);
     if (len < 0 || len >= (int)sizeof(kpath)) { current->t_errno = EFAULT; return -1; }
     kpath[len] = '\0';
+
+    /* Copy argv to kernel space if provided */
+    if (argv) {
+        if (!user_addr_range_ok(argv, sizeof(char *) * 32)) {
+            current->t_errno = EFAULT; return -1;
+        }
+        /* Store argv in task name for identification */
+        char *arg0 = NULL;
+        if (copy_from_user(&arg0, &argv[0], sizeof(char *)) == 0 && arg0) {
+            if (user_addr_range_ok(arg0, 1)) {
+                char karg0[32];
+                int alen = strncpy_from_user(karg0, arg0, sizeof(karg0) - 1);
+                if (alen > 0 && alen < (int)sizeof(karg0)) {
+                    karg0[alen] = '\0';
+                    strncpy(current->name, karg0, sizeof(current->name) - 1);
+                    current->name[sizeof(current->name) - 1] = '\0';
+                }
+            }
+        }
+    }
+    (void)envp;
+
     int ret = exec_elf(kpath);
     if (ret < 0) current->t_errno = ENOENT;
     return ret;
@@ -898,7 +919,6 @@ static long sys_gettimeofday(struct timeval *tv, void *tz) {
  * SYS_NANOSLEEP — Sleep for specified time
  * ================================================================ */
 static long sys_nanosleep(const struct timespec *req, struct timespec *rem) {
-    (void)rem;
     if (!req || !user_addr_range_ok(req, sizeof(struct timespec))) {
         current->t_errno = EFAULT; return -1;
     }
@@ -913,12 +933,28 @@ static long sys_nanosleep(const struct timespec *req, struct timespec *rem) {
     uint64_t target_ticks = target_ms / 10;
     if (target_ticks == 0) target_ticks = 1;
 
+    uint64_t start_ticks = perf.uptime_ticks;
+
     /* Set sleep_until and block */
-    current->sleep_until = perf.uptime_ticks + target_ticks;
+    current->sleep_until = start_ticks + target_ticks;
     current->state = TASK_BLOCKED;
     schedule();
 
-    /* Woken up by the timer interrupt */
+    /* Calculate remaining time if interrupted early */
+    if (rem && user_addr_range_ok(rem, sizeof(struct timespec))) {
+        uint64_t elapsed_ticks = perf.uptime_ticks - start_ticks;
+        if (elapsed_ticks < target_ticks) {
+            uint64_t remaining_ms = (target_ticks - elapsed_ticks) * 10;
+            struct timespec rts;
+            rts.tv_sec = remaining_ms / 1000;
+            rts.tv_nsec = (remaining_ms % 1000) * 1000000;
+            copy_to_user(rem, &rts, sizeof(rts));
+        } else {
+            struct timespec rts = {0, 0};
+            copy_to_user(rem, &rts, sizeof(rts));
+        }
+    }
+
     return 0;
 }
 
@@ -1089,13 +1125,17 @@ static long sys_getsockname(int sockfd, struct sockaddr_in *addr, int *addrlen) 
         current->t_errno = EFAULT; return -1;
     }
 
+    uint8_t local_ip[4] = {0};
+    uint16_t local_port = 0;
+
+    int ret = tcp_getsockname(sockfd, local_ip, &local_port);
+    if (ret < 0) { current->t_errno = ENOTSOCK; return -1; }
+
     struct sockaddr_in sa;
     memset(&sa, 0, sizeof(sa));
     sa.sin_family = AF_INET;
-    /* For now, return a placeholder address */
-    sa.sin_port = 0;
-    sa.sin_addr[0] = 127; sa.sin_addr[1] = 0;
-    sa.sin_addr[2] = 0;   sa.sin_addr[3] = 1;
+    sa.sin_port = sys_ntohs(local_port);
+    memcpy(sa.sin_addr, local_ip, 4);
 
     copy_to_user(addr, &sa, sizeof(sa));
     copy_to_user(addrlen, &(int){sizeof(sa)}, sizeof(int));
