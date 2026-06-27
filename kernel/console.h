@@ -77,6 +77,7 @@ uint8_t console_get_attr(void);
 /* Input */
 void console_input_char(char c);
 int  console_getline(char *buf, size_t buflen);
+int  console_has_input(void);
 void console_set_history_callback(void (*cb)(int direction));
 void console_set_tab_complete_callback(void (*cb)(void));
 void console_replace_line(const char *new_text);

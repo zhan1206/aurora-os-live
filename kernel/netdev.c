@@ -23,6 +23,10 @@ int netdev_register(struct net_device *netdev) {
     return 0;
 }
 
+struct net_device *netdev_get_first(void) {
+    return netdev_list;
+}
+
 struct net_device *netdev_find(const char *name) {
     if (!name) return NULL;
     struct net_device *netdev = netdev_list;

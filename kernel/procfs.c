@@ -27,6 +27,7 @@
 #include "perf.h"
 #include "mem.h"
 #include "pagetable.h"
+#include "cmdline.h"
 #include "include/log.h"
 #include "include/kstdio.h"
 #include <string.h>
@@ -528,10 +529,11 @@ static int read_filesystems(char *buf, size_t size) {
  */
 static int read_cmdline(char *buf, size_t size) {
     if (size < 64) return -1;
-    const char *cmdline = "auroraos console=tty0 root=/dev/ram0 quiet\n";
+    const char *cmdline = cmdline_get();
     int len = 0;
     for (const char *p = cmdline; *p && len < (int)size - 1; p++)
         buf[len++] = *p;
+    if (len < (int)size - 1) buf[len++] = '\n';
     buf[len] = '\0';
     return len;
 }

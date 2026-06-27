@@ -468,3 +468,172 @@ int vfs_file_dup(struct file *filp) {
     filp->refcount++;
     return 0;
 }
+
+/* ================================================================
+ * vfs_mkdir — Create a directory
+ * ================================================================ */
+int vfs_mkdir(const char *path) {
+    if (!root_sb || !root_dentry || !path || path[0] != '/') return -1;
+
+    /* Find the parent directory and the new directory name */
+    const char *last_slash = NULL;
+    for (const char *p = path; *p; p++) {
+        if (*p == '/') last_slash = p;
+    }
+    if (!last_slash || last_slash == path) return -1;
+
+    /* Extract parent path */
+    size_t parent_len = (size_t)(last_slash - path);
+    if (parent_len == 0) parent_len = 1; /* parent is "/" */
+
+    char parent_path[256];
+    if (parent_len >= sizeof(parent_path)) return -1;
+    memcpy(parent_path, path, parent_len);
+    parent_path[parent_len] = '\0';
+    if (parent_len == 1) parent_path[0] = '/';
+
+    const char *name = last_slash + 1;
+    if (*name == '\0') return -1;
+
+    struct inode *parent = vfs_lookup(parent_path);
+    if (!parent) return -1;
+    if (!parent->is_dir) return -1;
+    if (!parent->ops || !parent->ops->mkdir) return -1;
+
+    return parent->ops->mkdir(parent, name);
+}
+
+/* ================================================================
+ * vfs_rmdir — Remove an empty directory
+ * ================================================================ */
+int vfs_rmdir(const char *path) {
+    if (!root_sb || !root_dentry || !path || path[0] != '/') return -1;
+
+    /* Find the parent directory and the directory name */
+    const char *last_slash = NULL;
+    for (const char *p = path; *p; p++) {
+        if (*p == '/') last_slash = p;
+    }
+    if (!last_slash || last_slash == path) return -1;
+
+    size_t parent_len = (size_t)(last_slash - path);
+    if (parent_len == 0) parent_len = 1;
+
+    char parent_path[256];
+    if (parent_len >= sizeof(parent_path)) return -1;
+    memcpy(parent_path, path, parent_len);
+    parent_path[parent_len] = '\0';
+    if (parent_len == 1) parent_path[0] = '/';
+
+    const char *name = last_slash + 1;
+    if (*name == '\0') return -1;
+
+    struct inode *parent = vfs_lookup(parent_path);
+    if (!parent) return -1;
+    if (!parent->is_dir) return -1;
+    if (!parent->ops || !parent->ops->rmdir) return -1;
+
+    return parent->ops->rmdir(parent, name);
+}
+
+/* ================================================================
+ * vfs_unlink — Remove a file (not a directory)
+ * ================================================================ */
+int vfs_unlink(const char *path) {
+    if (!root_sb || !root_dentry || !path || path[0] != '/') return -1;
+
+    const char *last_slash = NULL;
+    for (const char *p = path; *p; p++) {
+        if (*p == '/') last_slash = p;
+    }
+    if (!last_slash || last_slash == path) return -1;
+
+    size_t parent_len = (size_t)(last_slash - path);
+    if (parent_len == 0) parent_len = 1;
+
+    char parent_path[256];
+    if (parent_len >= sizeof(parent_path)) return -1;
+    memcpy(parent_path, path, parent_len);
+    parent_path[parent_len] = '\0';
+    if (parent_len == 1) parent_path[0] = '/';
+
+    const char *name = last_slash + 1;
+    if (*name == '\0') return -1;
+
+    struct inode *parent = vfs_lookup(parent_path);
+    if (!parent) return -1;
+    if (!parent->is_dir) return -1;
+    if (!parent->ops || !parent->ops->unlink) return -1;
+
+    return parent->ops->unlink(parent, name);
+}
+
+/* ================================================================
+ * vfs_rename — Rename a file or directory
+ * ================================================================ */
+int vfs_rename(const char *oldpath, const char *newpath) {
+    if (!root_sb || !root_dentry || !oldpath || !newpath) return -1;
+    if (oldpath[0] != '/' || newpath[0] != '/') return -1;
+
+    /* Parse old path */
+    const char *old_slash = NULL;
+    for (const char *p = oldpath; *p; p++) {
+        if (*p == '/') old_slash = p;
+    }
+    if (!old_slash || old_slash == oldpath) return -1;
+
+    size_t old_parent_len = (size_t)(old_slash - oldpath);
+    if (old_parent_len == 0) old_parent_len = 1;
+    char old_parent_path[256];
+    if (old_parent_len >= sizeof(old_parent_path)) return -1;
+    memcpy(old_parent_path, oldpath, old_parent_len);
+    old_parent_path[old_parent_len] = '\0';
+    if (old_parent_len == 1) old_parent_path[0] = '/';
+    const char *oldname = old_slash + 1;
+
+    /* Parse new path */
+    const char *new_slash = NULL;
+    for (const char *p = newpath; *p; p++) {
+        if (*p == '/') new_slash = p;
+    }
+    if (!new_slash || new_slash == newpath) return -1;
+
+    size_t new_parent_len = (size_t)(new_slash - newpath);
+    if (new_parent_len == 0) new_parent_len = 1;
+    char new_parent_path[256];
+    if (new_parent_len >= sizeof(new_parent_path)) return -1;
+    memcpy(new_parent_path, newpath, new_parent_len);
+    new_parent_path[new_parent_len] = '\0';
+    if (new_parent_len == 1) new_parent_path[0] = '/';
+    const char *newname = new_slash + 1;
+
+    struct inode *olddir = vfs_lookup(old_parent_path);
+    struct inode *newdir = vfs_lookup(new_parent_path);
+    if (!olddir || !newdir) return -1;
+    if (!olddir->is_dir || !newdir->is_dir) return -1;
+    if (!olddir->ops || !olddir->ops->rename) return -1;
+
+    return olddir->ops->rename(olddir, oldname, newdir, newname);
+}
+
+/* ================================================================
+ * vfs_chmod — Change file mode
+ * ================================================================ */
+int vfs_chmod(const char *path, int mode) {
+    if (!root_sb || !root_dentry || !path || path[0] != '/') return -1;
+
+    struct inode *inode = vfs_lookup(path);
+    if (!inode) return -1;
+    if (!inode->ops || !inode->ops->chmod) return -1;
+
+    return inode->ops->chmod(inode, mode);
+}
+
+/* ================================================================
+ * vfs_ioctl — Device control operation
+ * ================================================================ */
+int vfs_ioctl(struct file *filp, int request, void *arg) {
+    if (!filp || !filp->inode) return -1;
+    if (!filp->inode->ops || !filp->inode->ops->ioctl) return -1;
+    return filp->inode->ops->ioctl(filp->inode, request, arg);
+}

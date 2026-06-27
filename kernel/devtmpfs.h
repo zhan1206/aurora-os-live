@@ -9,6 +9,8 @@
  *   /dev/zero    - Zero bytes source (read)
  *   /dev/console - System console
  *   /dev/tty     - Current terminal
+ *   /dev/random  - Hardware random number generator (RDRAND, blocking)
+ *   /dev/urandom - Hardware random number generator (RDRAND, non-blocking)
  */
 
 #ifndef DEVTMPFS_H

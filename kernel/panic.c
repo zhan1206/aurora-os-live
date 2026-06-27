@@ -168,6 +168,51 @@ void panic(const char *fmt, ...) {
     reg_line("CR2", regs.cr2); console_write("  ");
     reg_line("CR3", regs.cr3); console_putc('\n');
 
+    /* ---- Phase 4.5: Kernel Stack Trace ---- */
+    console_vpad(1);
+    console_write_ansi(PANIC_TITLE_FG);
+    console_write("     Stack Trace (most recent call first):");
+    console_write_ansi(SGR_RESET);
+    console_putc('\n');
+
+    {
+        uint64_t *rbp_ptr = (uint64_t *)regs.rbp;
+        int depth = 0;
+        int max_depth = 12;
+
+        while (rbp_ptr && depth < max_depth) {
+            uint64_t *next_rbp = (uint64_t *)*rbp_ptr;
+            uint64_t ret_addr = *(rbp_ptr + 1);
+
+            if (!next_rbp || ret_addr < 0x100000 || ret_addr > 0xFFFFFFFF) break;
+
+            console_write_ansi(PANIC_LABEL_FG);
+            console_write("       #");
+            {
+                char dbuf[4];
+                int n = 0;
+                int d = depth;
+                if (d == 0) { dbuf[0] = '0'; n = 1; }
+                else { while (d > 0 && n < 3) { dbuf[n++] = '0' + (d % 10); d /= 10; } }
+                for (int i = n - 1; i >= 0; i--) console_putc(dbuf[i]);
+            }
+            console_write("  ");
+            console_write_ansi(PANIC_VALUE_FG);
+            console_write("0x");
+            {
+                char hex[17];
+                uitoa_hex(ret_addr, hex, sizeof(hex));
+                console_write(hex);
+            }
+            console_write_ansi(SGR_RESET);
+            console_putc('\n');
+
+            if (next_rbp == rbp_ptr) break; /* prevent infinite loop */
+            rbp_ptr = next_rbp;
+            depth++;
+        }
+    }
+
     /* ---- Phase 5: Bottom Message ---- */
     int cur_row;
     console_get_cursor(&cur_row, NULL);

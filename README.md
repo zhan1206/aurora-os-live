@@ -4,7 +4,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Lines of Code](https://img.shields.io/badge/code-~8,500%20lines-blue)](kernel/)
 [![Self Tests](https://img.shields.io/badge/tests-20/20-brightgreen)](kernel/selftest.c)
-[![Version](https://img.shields.io/badge/version-v3.2.0-blue)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-v3.3.0-blue)](CHANGELOG.md)
 
 **100% 自研代码** | 无 Linux 内核代码 | 无第三方内核组件
 
@@ -274,7 +274,7 @@ AuroraOS
 - **Fork**: COW 页面克隆 + 完整寄存器状态复制
 - **SMP 支持**: 多核 CPU 支持，per-CPU 运行队列，负载均衡
 
-### 系统调用（22+ 个）
+### 系统调用（35+ 个）
 
 | 类别 | 系统调用 |
 |------|----------|
@@ -284,13 +284,25 @@ AuroraOS
 | 信号 | `kill`, `sigaction`, `sigreturn` |
 | 管道 | `pipe` |
 | 文件描述符 | `dup`, `dup2` |
+| 文件系统 | `mkdir`, `rmdir`, `unlink`, `rename`, `chmod`, `stat` |
+| 网络 | `socket`, `bind`, `connect`, `listen`, `accept`, `send`, `recv`, `sendto`, `recvfrom`, `shutdown`, `getsockname` |
+| 时间 | `gettimeofday`, `nanosleep`, `times` |
+| 设备控制 | `ioctl` |
+| I/O 多路复用 | `poll` |
 
 详见 [docs/api.md](docs/api.md)。
 
 ### 文件系统
-- **VFS 层**: 统一文件系统接口，dentry 缓存
-- **RamFS**: 内存文件系统（读/写/目录）
-- **EXT2**: 持久化文件系统（基本读/写/目录操作）
+- **VFS 层**: 统一文件系统接口，dentry 缓存 + LRU 回收
+- **RamFS**: 内存文件系统（读/写/创建/目录操作）
+- **EXT2**: 持久化文件系统（基本读/写/目录操作 + 日志 + fsck）
+- **devtmpfs**: 设备文件系统（受 CoolPotOS 启发）
+  - `/dev/null` - 数据黑洞
+  - `/dev/zero` - 零字节源
+  - `/dev/console` - 系统控制台
+  - `/dev/tty` - 当前终端
+  - `/dev/random` - 硬件随机数（RDRAND，阻塞）
+  - `/dev/urandom` - 硬件随机数（RDRAND，非阻塞）
 - **procfs**: 虚拟文件系统（受 CoolPotOS 启发）
   - `/proc/cpuinfo` - CPU 信息
   - `/proc/meminfo` - 内存统计
@@ -302,7 +314,19 @@ AuroraOS
   - `/proc/cmdline` - 内核命令行参数
   - `/proc/kmsg` - 内核日志环形缓冲区
   - `/proc/self/stat` - 当前进程状态
+  - `/proc/self/maps` - 当前进程内存映射
+  - `/proc/self/cmdline` - 当前进程命令行
 - **管道**: 匿名管道，环形缓冲区（4096 字节）
+
+### 网络栈
+- **TCP/IP 协议栈**: 完整的网络协议支持
+  - ARP（地址解析协议）
+  - IPv4（互联网协议）
+  - ICMP（互联网控制消息协议，含 ping 支持）
+  - UDP（用户数据报协议）
+  - TCP（传输控制协议，含 listen/accept 服务器端支持）
+- **Socket API**: 11 个 Berkeley 风格 socket 系统调用
+- **VirtIO 网络驱动**: 支持 QEMU VirtIO 网络设备
 
 ### 信号
 - **信号类型**: SIGINT(2), SIGKILL(9), SIGSEGV(11), SIGTERM(15), SIGCHLD(17)
@@ -312,9 +336,12 @@ AuroraOS
 ### 安全机制
 - **ASLR**: 地址空间布局随机化
 - **Stack Protector**: 栈溢出保护（canary 检查）
+- **SMAP/SMEP**: 内核访问/执行用户空间内存保护
 - **seccomp**: 系统调用过滤
 - **Capability**: 权能安全机制
 - **内核模块签名**: 模块签名验证（受 CoolPotOS 启发）
+- **整数溢出保护**: 关键内存分配路径溢出检查
+- **NULL 指针保护**: 系统调用关键路径 NULL 检查
 
 ### 性能监控
 - **性能计数器**: 上下文切换、系统调用、缺页、COW、IRQ 等指标

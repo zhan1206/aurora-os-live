@@ -16,4 +16,7 @@ int strncmp(const char *a, const char *b, size_t n);
 char *strcpy(char *dst, const char *src);
 char *strncpy(char *dst, const char *src, size_t n);
 
+/* snprintf: simple formatted output to buffer (supports %s, %d, %u, %x, %p) */
+int snprintf(char *buf, size_t size, const char *fmt, ...);
+
 #endif /* KERNEL_STRING_H */

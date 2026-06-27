@@ -1,5 +1,52 @@
 # AuroraOS Changelog
 
+## v3.3.0 (2026-06-27) — System Call Expansion & Security Hardening
+
+### 新系统调用 (Phase 3)
+- **文件系统管理**: 新增 `mkdir`, `rmdir`, `unlink`, `rename`, `chmod` 系统调用，支持完整的文件系统操作
+- **设备控制**: 新增 `ioctl` 系统调用，支持设备特定的控制操作
+- **I/O 多路复用**: 新增 `poll` 系统调用，支持同时等待多个文件描述符
+- **Socket 管理**: 新增 `shutdown`, `getsockname` 系统调用，完善网络编程 API
+- **时间系统**: 修复 `nanosleep` 系统调用，实现基于 sleep/wakeup 机制的精确睡眠
+
+### 网络栈增强 (Phase 3)
+- **TCP 监听**: 实现 `tcp_listen` 和 `tcp_accept`，支持 TCP 服务器端编程
+- **TCP 关闭**: 实现 `tcp_shutdown`，支持优雅关闭 TCP 连接
+- **UDP 接收**: 实现 `udp_recvfrom`，支持接收 UDP 数据包并获取发送方地址
+- **连接队列**: 实现 TCP 连接积压队列，支持多个待处理连接
+
+### 性能优化与安全加固 (Phase 4)
+- **O_CREAT 支持**: 完善 `sys_open` 的 O_CREAT 标志实现，支持创建新文件
+  - 新增 `create` 操作到 `file_ops` 结构体
+  - 在 ramfs 中实现 `ramfs_create` 文件创建函数
+  - 添加 `O_RDONLY`, `O_WRONLY`, `O_RDWR`, `O_CREAT`, `O_TRUNC`, `O_APPEND` 标志定义
+- **/dev/random & /dev/urandom**: 使用 RDRAND 指令实现硬件随机数生成器
+  - 将 random/urandom 添加到 devtmpfs 设备表
+  - `/dev/random` 采用阻塞模式（重试直到成功）
+  - `/dev/urandom` 采用非阻塞模式（失败时返回已生成的数据）
+  - 移除 sys_open 中的 /dev/random 硬编码 hack
+- **内核命令行解析**: 实现完整的内核命令行系统
+  - 新增 `cmdline.h` / `cmdline.c` 模块
+  - 支持 `cmdline_has_flag()` 和 `cmdline_get_option()` 查询
+  - `/proc/cmdline` 现在使用实际的命令行缓冲区
+- **panic 栈回溯**: 在 panic 处理中添加内核栈回溯（Phase 4.5），显示最近的 12 层调用栈
+- **snprintf**: 实现格式化字符串输出函数，支持 `%s`, `%d`, `%u`, `%x`, `%p`, `%c`
+
+### 安全加固 (Phase 4.5)
+- **sys_execve**: 增加 `current` NULL 检查和 `strncpy_from_user` 长度边界检查
+- **sys_fork**: 增加 `current` NULL 检查和 `child->rsp` NULL 检查
+- **kmalloc**: 修复大内存分配路径中的整数溢出漏洞（`size + PAGE_SIZE - 1` 溢出检查）
+
+### VFS 增强
+- `file_ops` 结构体新增 `create` 操作函数指针
+- devtmpfs 设备表扩展至 6 个设备（null, zero, console, tty, random, urandom）
+
+### 文档更新
+- CHANGELOG.md: 新增 v3.3.0 版本记录
+- devtmpfs.h: 更新设备列表文档，包含新增的 random/urandom 设备
+
+---
+
 ## v3.2.0 (2026-06-20) — Comprehensive Bug Fixes & UX Optimization
 
 ### Bug 修复

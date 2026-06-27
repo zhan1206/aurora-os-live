@@ -32,6 +32,33 @@ enum {
     SYS_EXIT      = 60,
     SYS_WAITPID   = 61,
     SYS_TIMES     = 100,
+    /* Network / socket syscalls */
+    SYS_SOCKET    = 41,
+    SYS_CONNECT   = 42,
+    SYS_BIND      = 49,
+    SYS_LISTEN    = 50,
+    SYS_ACCEPT    = 43,
+    SYS_SENDTO    = 44,
+    SYS_RECVFROM  = 45,
+    SYS_SEND      = 46,
+    SYS_RECV      = 47,
+    SYS_SHUTDOWN  = 48,
+    SYS_GETSOCKNAME = 51,
+    /* Time syscalls */
+    SYS_GETTIMEOFDAY = 96,
+    SYS_NANOSLEEP    = 35,
+    /* Extended stat */
+    SYS_STAT      = 4,
+    /* Filesystem management */
+    SYS_MKDIR     = 83,
+    SYS_RMDIR     = 84,
+    SYS_UNLINK    = 87,
+    SYS_RENAME    = 82,
+    SYS_CHMOD     = 90,
+    /* Device control */
+    SYS_IOCTL     = 16,
+    /* I/O multiplexing */
+    SYS_POLL      = 7,
 };
 
 /* struct utsname — POSIX uname structure */
@@ -49,6 +76,68 @@ struct tms {
     uint64_t tms_stime;
     uint64_t tms_cutime;
     uint64_t tms_cstime;
+};
+
+/* struct timeval — POSIX timeval structure */
+struct timeval {
+    uint64_t tv_sec;
+    uint64_t tv_usec;
+};
+
+/* struct timespec — POSIX timespec structure */
+struct timespec {
+    uint64_t tv_sec;
+    uint64_t tv_nsec;
+};
+
+/* struct sockaddr — basic socket address (AF_INET) */
+struct sockaddr {
+    uint16_t sa_family;
+    uint8_t  sa_data[14];
+};
+
+/* struct sockaddr_in — IPv4 socket address */
+struct sockaddr_in {
+    uint16_t sin_family;  /* AF_INET = 2 */
+    uint16_t sin_port;
+    uint8_t  sin_addr[4];
+    uint8_t  sin_zero[8];
+};
+
+/* AF_INET = 2 (IPv4) */
+#define AF_INET 2
+
+/* Socket types */
+#define SOCK_STREAM 1
+#define SOCK_DGRAM  2
+
+/* struct pollfd — poll file descriptor */
+struct pollfd {
+    int   fd;
+    short events;
+    short revents;
+};
+
+/* poll event flags */
+#define POLLIN   0x001
+#define POLLOUT  0x004
+#define POLLERR  0x008
+#define POLLHUP  0x010
+
+/* struct stat — extended file stat */
+struct kstat_ext {
+    uint64_t st_dev;
+    uint64_t st_ino;
+    uint32_t st_mode;
+    uint32_t st_nlink;
+    uint32_t st_uid;
+    uint32_t st_gid;
+    uint64_t st_size;
+    uint64_t st_blksize;
+    uint64_t st_blocks;
+    uint64_t st_atime;
+    uint64_t st_mtime;
+    uint64_t st_ctime;
 };
 
 /* Called from syscall_entry.c (MSR setup) */

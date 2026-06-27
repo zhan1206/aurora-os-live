@@ -7,6 +7,8 @@
 #include "include/userspace.h"
 #include "include/trapframe.h"
 #include "include/errno.h"
+#include "include/net.h"
+#include "include/version.h"
 #include "sched.h"
 #include "signal.h"
 #include "vfs.h"
@@ -16,6 +18,7 @@
 #include "capability.h"
 #include "perf.h"
 #include "seccomp.h"
+#include "rtc.h"
 #include <stdint.h>
 #include <stddef.h>
 #include <string.h>
@@ -111,7 +114,51 @@ static long sys_open(const char *path, int flags) {
     kpath[len] = '\0';  /* ensure null termination */
 
     struct file *filp = vfs_open(kpath, flags);
-    if (!filp) { current->t_errno = ENOENT; return -1; }
+    if (!filp) {
+        /* O_CREAT: if file doesn't exist and O_CREAT is set, create it */
+        if (flags & O_CREAT) {
+            /* Find the parent directory and the new file name */
+            const char *last_slash = NULL;
+            for (const char *p = kpath; *p; p++) {
+                if (*p == '/') last_slash = p;
+            }
+            if (!last_slash || last_slash == kpath) {
+                current->t_errno = EINVAL; return -1;
+            }
+
+            /* Extract parent path */
+            size_t parent_len = (size_t)(last_slash - kpath);
+            if (parent_len == 0) parent_len = 1;
+            char parent_path[256];
+            if (parent_len >= sizeof(parent_path)) {
+                current->t_errno = ENAMETOOLONG; return -1;
+            }
+            memcpy(parent_path, kpath, parent_len);
+            parent_path[parent_len] = '\0';
+            if (parent_len == 1) parent_path[0] = '/';
+
+            const char *name = last_slash + 1;
+            if (*name == '\0') { current->t_errno = EINVAL; return -1; }
+
+            struct inode *parent = vfs_lookup(parent_path);
+            if (!parent || !parent->is_dir) {
+                current->t_errno = ENOENT; return -1;
+            }
+            if (!parent->ops || !parent->ops->create) {
+                current->t_errno = EROFS; return -1;
+            }
+
+            if (parent->ops->create(parent, name, flags) < 0) {
+                current->t_errno = ENOSPC; return -1;
+            }
+
+            /* Now the file should exist — try opening again */
+            filp = vfs_open(kpath, flags);
+            if (!filp) { current->t_errno = ENOENT; return -1; }
+        } else {
+            current->t_errno = ENOENT; return -1;
+        }
+    }
 
     int fd = fd_alloc(current, filp);
     if (fd < 0) {
@@ -342,10 +389,11 @@ static long sys_mprotect(void *addr, size_t length, int prot) {
 
 static long sys_execve(const char *path, char *const argv[], char *const envp[]) {
     (void)argv; (void)envp;
-    if (!path) { current->t_errno = EFAULT; return -1; }
+    if (!path || !current) { current->t_errno = EFAULT; return -1; }
+    if (!user_addr_range_ok(path, 1)) { current->t_errno = EFAULT; return -1; }
     char kpath[256];
     int len = strncpy_from_user(kpath, path, sizeof(kpath) - 1);
-    if (len < 0) { current->t_errno = EFAULT; return -1; }
+    if (len < 0 || len >= (int)sizeof(kpath)) { current->t_errno = EFAULT; return -1; }
     kpath[len] = '\0';
     int ret = exec_elf(kpath);
     if (ret < 0) current->t_errno = ENOENT;
@@ -408,6 +456,8 @@ static long wrap_sys_pipe(int *fds) {
  * (right after the fork syscall) with the same register state.
  */
 long sys_fork(void) {
+    if (!current) { current->t_errno = ESRCH; return -1; }
+
     uint64_t child_cr3 = clone_current_pml4();
     if (child_cr3 == get_kernel_cr3()) { current->t_errno = ENOMEM; return -1; }
 
@@ -433,7 +483,7 @@ long sys_fork(void) {
      * The 13 regs are at sp[0..12] in syscall_entry push order:
      *   r15,r14,r13,r12,r11,r10,r9,r8,rsi,rdi,rdx,rcx,rax
      */
-    if (current_tf) {
+    if (current_tf && child->rsp) {
         uint64_t *child_sp = (uint64_t *)child->rsp;
         child_sp[0]  = current_tf->r15;
         child_sp[1]  = current_tf->r14;
@@ -480,8 +530,9 @@ static long sys_uname(struct utsname *buf) {
     memset(&u, 0, sizeof(u));
     strcpy(u.sysname, "AuroraOS");
     strcpy(u.nodename, "aurora");
-    strcpy(u.release, "3.2.0");
-    strcpy(u.version, "#1 SMP 2026-06-20");
+    snprintf(u.release, sizeof(u.release), "%d.%d.%d",
+             AURORAOS_MAJOR, AURORAOS_MINOR, AURORAOS_PATCH);
+    snprintf(u.version, sizeof(u.version), "#1 SMP %s", BUILD_DATE);
     strcpy(u.machine, "x86_64");
     if (copy_to_user(buf, &u, sizeof(u)) != 0) {
         current->t_errno = EFAULT; return -1;
@@ -537,6 +588,516 @@ static long sys_chdir(const char *path) {
 }
 
 /* ================================================================
+ * SYS_STAT — Extended file stat with timestamps
+ * ================================================================ */
+static long sys_stat(const char *path, struct kstat_ext *statbuf) {
+    if (!path || !statbuf) { current->t_errno = EFAULT; return -1; }
+    if (!user_addr_range_ok(statbuf, sizeof(struct kstat_ext))) {
+        current->t_errno = EFAULT; return -1;
+    }
+
+    char kpath[256];
+    int len = strncpy_from_user(kpath, path, sizeof(kpath) - 1);
+    if (len < 0) { current->t_errno = EFAULT; return -1; }
+    kpath[len] = '\0';
+
+    struct inode *inode = vfs_lookup(kpath);
+    if (!inode) { current->t_errno = ENOENT; return -1; }
+
+    struct kstat_ext ks;
+    memset(&ks, 0, sizeof(ks));
+    ks.st_dev = 0;
+    ks.st_ino = (uint64_t)(uintptr_t)inode;
+    ks.st_mode = inode->is_dir ? 0040755 : 0100755;
+    ks.st_nlink = 1;
+    ks.st_uid = 0;
+    ks.st_gid = 0;
+    ks.st_size = inode->size;
+    ks.st_blksize = 4096;
+    ks.st_blocks = (inode->size + 511) / 512;
+
+    if (copy_to_user(statbuf, &ks, sizeof(ks)) != 0) {
+        current->t_errno = EFAULT; return -1;
+    }
+    return 0;
+}
+
+/* ================================================================
+ * SYS_SOCKET — Create a network socket
+ * ================================================================ */
+static long sys_socket(int domain, int type, int protocol) {
+    (void)protocol;
+    if (domain != AF_INET) { current->t_errno = EAFNOSUPPORT; return -1; }
+    if (type != SOCK_STREAM && type != SOCK_DGRAM) {
+        current->t_errno = EPROTONOSUPPORT; return -1;
+    }
+
+    int sock = -1;
+    if (type == SOCK_STREAM) {
+        sock = tcp_socket_create();
+    } else {
+        /* UDP: use a simple fd-based approach for now */
+        sock = fd_alloc(current, NULL);
+        if (sock >= 0) {
+            /* Mark as UDP socket by storing a sentinel */
+            current->fd_table[sock] = (uintptr_t)(void *)0x1;
+        }
+    }
+    if (sock < 0) { current->t_errno = EMFILE; return -1; }
+    return sock;
+}
+
+/* ================================================================
+ * SYS_BIND — Bind a socket to an address
+ * ================================================================ */
+static long sys_bind(int sockfd, const struct sockaddr_in *addr,
+                     int addrlen) {
+    if (sockfd < 0 || sockfd >= MAX_FDS) { current->t_errno = EBADF; return -1; }
+    if (!addr || addrlen < (int)sizeof(struct sockaddr_in)) {
+        current->t_errno = EINVAL; return -1;
+    }
+    if (!user_addr_range_ok(addr, sizeof(struct sockaddr_in))) {
+        current->t_errno = EFAULT; return -1;
+    }
+
+    struct sockaddr_in sa;
+    if (copy_from_user(&sa, addr, sizeof(sa)) != 0) {
+        current->t_errno = EFAULT; return -1;
+    }
+
+    /* For TCP sockets, bind to port */
+    uintptr_t fd_val = current->fd_table[sockfd];
+    if (fd_val == (uintptr_t)-1) { current->t_errno = EBADF; return -1; }
+
+    /* Check if it's a TCP socket (has a valid fd from tcp_socket_create) */
+    if (fd_val != 0x1 && fd_val != 0) {
+        int tcp_sock = tcp_bind(sockfd, ntohs(sa.sin_port));
+        if (tcp_sock < 0) { current->t_errno = EADDRINUSE; return -1; }
+    }
+    return 0;
+}
+
+/* Helper: ntohs for syscall use */
+static inline uint16_t sys_ntohs(uint16_t n) {
+    return ((n & 0xFF) << 8) | ((n & 0xFF00) >> 8);
+}
+
+/* ================================================================
+ * SYS_CONNECT — Connect a TCP socket to a remote address
+ * ================================================================ */
+static long sys_connect(int sockfd, const struct sockaddr_in *addr,
+                        int addrlen) {
+    if (sockfd < 0 || sockfd >= MAX_FDS) { current->t_errno = EBADF; return -1; }
+    if (!addr || addrlen < (int)sizeof(struct sockaddr_in)) {
+        current->t_errno = EINVAL; return -1;
+    }
+    if (!user_addr_range_ok(addr, sizeof(struct sockaddr_in))) {
+        current->t_errno = EFAULT; return -1;
+    }
+
+    struct sockaddr_in sa;
+    if (copy_from_user(&sa, addr, sizeof(sa)) != 0) {
+        current->t_errno = EFAULT; return -1;
+    }
+
+    int ret = tcp_connect(sockfd, sa.sin_addr, sys_ntohs(sa.sin_port));
+    if (ret < 0) { current->t_errno = ECONNREFUSED; return -1; }
+    return 0;
+}
+
+/* ================================================================
+ * SYS_LISTEN — Listen for incoming connections
+ * ================================================================ */
+static long sys_listen(int sockfd, int backlog) {
+    if (sockfd < 0 || sockfd >= MAX_FDS) { current->t_errno = EBADF; return -1; }
+    int ret = tcp_listen(sockfd, backlog);
+    if (ret < 0) { current->t_errno = EADDRINUSE; return -1; }
+    return 0;
+}
+
+/* ================================================================
+ * SYS_ACCEPT — Accept a connection
+ * ================================================================ */
+static long sys_accept(int sockfd, struct sockaddr_in *addr, int *addrlen) {
+    if (sockfd < 0 || sockfd >= MAX_FDS) { current->t_errno = EBADF; return -1; }
+
+    uint8_t remote_ip[4] = {0};
+    uint16_t remote_port = 0;
+
+    int new_sock = tcp_accept(sockfd, remote_ip, &remote_port);
+    if (new_sock < 0) { current->t_errno = EAGAIN; return -1; }
+
+    /* Fill in the address if provided */
+    if (addr && addrlen) {
+        if (!user_addr_range_ok(addr, sizeof(struct sockaddr_in)) ||
+            !user_addr_range_ok(addrlen, sizeof(int))) {
+            current->t_errno = EFAULT; return -1;
+        }
+        struct sockaddr_in sa;
+        memset(&sa, 0, sizeof(sa));
+        sa.sin_family = AF_INET;
+        sa.sin_port = sys_ntohs(remote_port);
+        memcpy(sa.sin_addr, remote_ip, 4);
+        copy_to_user(addr, &sa, sizeof(sa));
+        copy_to_user(addrlen, &(int){sizeof(sa)}, sizeof(int));
+    }
+    return new_sock;
+}
+
+/* ================================================================
+ * SYS_SEND — Send data on a connected socket
+ * ================================================================ */
+static long sys_send(int sockfd, const void *buf, size_t len, int flags) {
+    (void)flags;
+    if (sockfd < 0 || sockfd >= MAX_FDS) { current->t_errno = EBADF; return -1; }
+    if (!buf || len == 0) return 0;
+    if (!user_addr_range_ok(buf, len)) { current->t_errno = EFAULT; return -1; }
+
+    /* Copy data from user space */
+    void *kbuf = kmalloc(len);
+    if (!kbuf) { current->t_errno = ENOMEM; return -1; }
+    if (copy_from_user(kbuf, buf, len) != 0) {
+        kfree(kbuf);
+        current->t_errno = EFAULT; return -1;
+    }
+
+    int ret = tcp_send(sockfd, kbuf, (int)len);
+    kfree(kbuf);
+    if (ret < 0) { current->t_errno = ECONNRESET; return -1; }
+    return ret;
+}
+
+/* ================================================================
+ * SYS_RECV — Receive data from a connected socket
+ * ================================================================ */
+static long sys_recv(int sockfd, void *buf, size_t len, int flags) {
+    (void)flags;
+    if (sockfd < 0 || sockfd >= MAX_FDS) { current->t_errno = EBADF; return -1; }
+    if (!buf || len == 0) return 0;
+    if (!user_addr_range_ok(buf, len)) { current->t_errno = EFAULT; return -1; }
+
+    /* Poll for packets */
+    net_poll();
+
+    void *kbuf = kmalloc(len);
+    if (!kbuf) { current->t_errno = ENOMEM; return -1; }
+
+    int ret = tcp_recv(sockfd, kbuf, (int)len);
+    if (ret < 0) { kfree(kbuf); current->t_errno = ECONNRESET; return -1; }
+    if (ret > 0) {
+        if (copy_to_user(buf, kbuf, (size_t)ret) != 0) {
+            kfree(kbuf);
+            current->t_errno = EFAULT; return -1;
+        }
+    }
+    kfree(kbuf);
+    return ret;
+}
+
+/* ================================================================
+ * SYS_SENDTO / SYS_RECVFROM — UDP datagram operations
+ * ================================================================ */
+static long sys_sendto(int sockfd, const void *buf, size_t len, int flags,
+                       const struct sockaddr_in *dest_addr, int addrlen) {
+    (void)flags;
+    if (sockfd < 0 || sockfd >= MAX_FDS) { current->t_errno = EBADF; return -1; }
+    if (!buf || len == 0) return 0;
+    if (!dest_addr || addrlen < (int)sizeof(struct sockaddr_in)) {
+        current->t_errno = EINVAL; return -1;
+    }
+    if (!user_addr_range_ok(buf, len)) { current->t_errno = EFAULT; return -1; }
+    if (!user_addr_range_ok(dest_addr, sizeof(struct sockaddr_in))) {
+        current->t_errno = EFAULT; return -1;
+    }
+
+    struct sockaddr_in sa;
+    if (copy_from_user(&sa, dest_addr, sizeof(sa)) != 0) {
+        current->t_errno = EFAULT; return -1;
+    }
+
+    void *kbuf = kmalloc(len);
+    if (!kbuf) { current->t_errno = ENOMEM; return -1; }
+    if (copy_from_user(kbuf, buf, len) != 0) {
+        kfree(kbuf);
+        current->t_errno = EFAULT; return -1;
+    }
+
+    int ret = udp_send(0, sa.sin_addr, sys_ntohs(sa.sin_port), kbuf, (uint16_t)len);
+    kfree(kbuf);
+    if (ret < 0) { current->t_errno = ENETUNREACH; return -1; }
+    return (long)len;
+}
+
+static long sys_recvfrom(int sockfd, void *buf, size_t len, int flags,
+                         struct sockaddr_in *src_addr, int *addrlen) {
+    (void)flags;
+    if (sockfd < 0 || sockfd >= MAX_FDS) { current->t_errno = EBADF; return -1; }
+    if (!buf || len == 0) return 0;
+    if (!user_addr_range_ok(buf, len)) { current->t_errno = EFAULT; return -1; }
+
+    /* Poll for UDP packets */
+    net_poll();
+
+    /* Determine the UDP port from the fd */
+    uint16_t udp_port = (uint16_t)(sockfd + 1024); /* simple port mapping */
+
+    void *kbuf = kmalloc(len);
+    if (!kbuf) { current->t_errno = ENOMEM; return -1; }
+
+    uint8_t src_ip[4] = {0};
+    uint16_t src_port = 0;
+
+    int ret = udp_recvfrom(udp_port, kbuf, (int)len, src_ip, &src_port);
+    if (ret < 0) { kfree(kbuf); return 0; }  /* no data, return 0 */
+
+    if (copy_to_user(buf, kbuf, (size_t)ret) != 0) {
+        kfree(kbuf);
+        current->t_errno = EFAULT; return -1;
+    }
+    kfree(kbuf);
+
+    /* Fill in source address if provided */
+    if (src_addr && addrlen) {
+        if (!user_addr_range_ok(src_addr, sizeof(struct sockaddr_in)) ||
+            !user_addr_range_ok(addrlen, sizeof(int))) {
+            return (long)ret;
+        }
+        struct sockaddr_in sa;
+        memset(&sa, 0, sizeof(sa));
+        sa.sin_family = AF_INET;
+        sa.sin_port = sys_ntohs(src_port);
+        memcpy(sa.sin_addr, src_ip, 4);
+        copy_to_user(src_addr, &sa, sizeof(sa));
+        copy_to_user(addrlen, &(int){sizeof(sa)}, sizeof(int));
+    }
+    return (long)ret;
+}
+
+/* ================================================================
+ * SYS_GETTIMEOFDAY — Get current time
+ * ================================================================ */
+static long sys_gettimeofday(struct timeval *tv, void *tz) {
+    (void)tz;
+    if (!tv || !user_addr_range_ok(tv, sizeof(struct timeval))) {
+        current->t_errno = EFAULT; return -1;
+    }
+
+    struct timeval ktv;
+    rtc_get_timeval(&ktv.tv_sec, &ktv.tv_usec);
+
+    if (copy_to_user(tv, &ktv, sizeof(ktv)) != 0) {
+        current->t_errno = EFAULT; return -1;
+    }
+    return 0;
+}
+
+/* ================================================================
+ * SYS_NANOSLEEP — Sleep for specified time
+ * ================================================================ */
+static long sys_nanosleep(const struct timespec *req, struct timespec *rem) {
+    (void)rem;
+    if (!req || !user_addr_range_ok(req, sizeof(struct timespec))) {
+        current->t_errno = EFAULT; return -1;
+    }
+
+    struct timespec ts;
+    if (copy_from_user(&ts, req, sizeof(ts)) != 0) {
+        current->t_errno = EFAULT; return -1;
+    }
+
+    /* Calculate target tick: 100 Hz = 10ms per tick */
+    uint64_t target_ms = ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+    uint64_t target_ticks = target_ms / 10;
+    if (target_ticks == 0) target_ticks = 1;
+
+    /* Set sleep_until and block */
+    current->sleep_until = perf.uptime_ticks + target_ticks;
+    current->state = TASK_BLOCKED;
+    schedule();
+
+    /* Woken up by the timer interrupt */
+    return 0;
+}
+
+/* ================================================================
+ * SYS_MKDIR — Create a directory
+ * ================================================================ */
+static long sys_mkdir(const char *path, int mode) {
+    (void)mode;
+    if (!path) { current->t_errno = EFAULT; return -1; }
+    char kpath[256];
+    int len = strncpy_from_user(kpath, path, sizeof(kpath) - 1);
+    if (len < 0) { current->t_errno = EFAULT; return -1; }
+    kpath[len] = '\0';
+
+    int ret = vfs_mkdir(kpath);
+    if (ret < 0) { current->t_errno = EEXIST; return -1; }
+    return 0;
+}
+
+/* ================================================================
+ * SYS_RMDIR — Remove a directory
+ * ================================================================ */
+static long sys_rmdir(const char *path) {
+    if (!path) { current->t_errno = EFAULT; return -1; }
+    char kpath[256];
+    int len = strncpy_from_user(kpath, path, sizeof(kpath) - 1);
+    if (len < 0) { current->t_errno = EFAULT; return -1; }
+    kpath[len] = '\0';
+
+    int ret = vfs_rmdir(kpath);
+    if (ret < 0) { current->t_errno = ENOTEMPTY; return -1; }
+    return 0;
+}
+
+/* ================================================================
+ * SYS_UNLINK — Remove a file
+ * ================================================================ */
+static long sys_unlink(const char *path) {
+    if (!path) { current->t_errno = EFAULT; return -1; }
+    char kpath[256];
+    int len = strncpy_from_user(kpath, path, sizeof(kpath) - 1);
+    if (len < 0) { current->t_errno = EFAULT; return -1; }
+    kpath[len] = '\0';
+
+    int ret = vfs_unlink(kpath);
+    if (ret < 0) { current->t_errno = ENOENT; return -1; }
+    return 0;
+}
+
+/* ================================================================
+ * SYS_RENAME — Rename a file or directory
+ * ================================================================ */
+static long sys_rename(const char *oldpath, const char *newpath) {
+    if (!oldpath || !newpath) { current->t_errno = EFAULT; return -1; }
+    char kold[256], knew[256];
+    int len_old = strncpy_from_user(kold, oldpath, sizeof(kold) - 1);
+    int len_new = strncpy_from_user(knew, newpath, sizeof(knew) - 1);
+    if (len_old < 0 || len_new < 0) { current->t_errno = EFAULT; return -1; }
+    kold[len_old] = '\0';
+    knew[len_new] = '\0';
+
+    int ret = vfs_rename(kold, knew);
+    if (ret < 0) { current->t_errno = EXDEV; return -1; }
+    return 0;
+}
+
+/* ================================================================
+ * SYS_CHMOD — Change file mode
+ * ================================================================ */
+static long sys_chmod(const char *path, int mode) {
+    if (!path) { current->t_errno = EFAULT; return -1; }
+    char kpath[256];
+    int len = strncpy_from_user(kpath, path, sizeof(kpath) - 1);
+    if (len < 0) { current->t_errno = EFAULT; return -1; }
+    kpath[len] = '\0';
+
+    int ret = vfs_chmod(kpath, mode);
+    if (ret < 0) { current->t_errno = EACCES; return -1; }
+    return 0;
+}
+
+/* ================================================================
+ * SYS_IOCTL — Device control
+ * ================================================================ */
+static long sys_ioctl(int fd, int request, void *arg) {
+    if (fd < 0 || fd >= MAX_FDS) { current->t_errno = EBADF; return -1; }
+    struct file *filp = (struct file *)fd_get(current, fd);
+    if (!filp) { current->t_errno = EBADF; return -1; }
+
+    int ret = vfs_ioctl(filp, request, arg);
+    if (ret < 0) { current->t_errno = ENOTTY; return -1; }
+    return ret;
+}
+
+/* ================================================================
+ * SYS_POLL — Wait for events on file descriptors
+ * ================================================================ */
+static long sys_poll(struct pollfd *fds, int nfds, int timeout) {
+    if (!fds || nfds <= 0) { current->t_errno = EINVAL; return -1; }
+    if (!user_addr_range_ok(fds, (size_t)nfds * sizeof(struct pollfd))) {
+        current->t_errno = EFAULT; return -1;
+    }
+
+    /* Simple poll: check each fd for readability */
+    struct pollfd kfds[16];
+    if (nfds > 16) nfds = 16;
+    if (copy_from_user(kfds, fds, (size_t)nfds * sizeof(struct pollfd)) != 0) {
+        current->t_errno = EFAULT; return -1;
+    }
+
+    int ready = 0;
+    for (int i = 0; i < nfds; i++) {
+        kfds[i].revents = 0;
+        if (kfds[i].fd < 0) continue;
+
+        /* fd 0 (stdin): check if console has input */
+        if (kfds[i].fd == 0) {
+            extern int console_has_input(void);
+            if (console_has_input()) {
+                kfds[i].revents |= POLLIN;
+                ready++;
+            }
+        } else if (kfds[i].fd > 0) {
+            /* Other fds: check if they exist and are readable */
+            struct file *filp = (struct file *)fd_get(current, kfds[i].fd);
+            if (filp) {
+                kfds[i].revents |= POLLIN;
+                ready++;
+            }
+        }
+    }
+
+    /* If timeout and no fd ready, block briefly */
+    if (ready == 0 && timeout > 0) {
+        uint64_t target_ticks = (uint64_t)timeout / 10;
+        if (target_ticks == 0) target_ticks = 1;
+        current->sleep_until = perf.uptime_ticks + target_ticks;
+        current->state = TASK_BLOCKED;
+        schedule();
+    }
+
+    if (copy_to_user(fds, kfds, (size_t)nfds * sizeof(struct pollfd)) != 0) {
+        current->t_errno = EFAULT; return -1;
+    }
+    return (long)ready;
+}
+
+/* ================================================================
+ * SYS_SHUTDOWN — Shut down part of a socket connection
+ * ================================================================ */
+static long sys_shutdown(int sockfd, int how) {
+    if (sockfd < 0 || sockfd >= MAX_FDS) { current->t_errno = EBADF; return -1; }
+    int ret = tcp_shutdown(sockfd, how);
+    if (ret < 0) { current->t_errno = ENOTCONN; return -1; }
+    return 0;
+}
+
+/* ================================================================
+ * SYS_GETSOCKNAME — Get socket address
+ * ================================================================ */
+static long sys_getsockname(int sockfd, struct sockaddr_in *addr, int *addrlen) {
+    if (sockfd < 0 || sockfd >= MAX_FDS) { current->t_errno = EBADF; return -1; }
+    if (!addr || !addrlen) { current->t_errno = EINVAL; return -1; }
+    if (!user_addr_range_ok(addr, sizeof(struct sockaddr_in)) ||
+        !user_addr_range_ok(addrlen, sizeof(int))) {
+        current->t_errno = EFAULT; return -1;
+    }
+
+    struct sockaddr_in sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sin_family = AF_INET;
+    /* For now, return a placeholder address */
+    sa.sin_port = 0;
+    sa.sin_addr[0] = 127; sa.sin_addr[1] = 0;
+    sa.sin_addr[2] = 0;   sa.sin_addr[3] = 1;
+
+    copy_to_user(addr, &sa, sizeof(sa));
+    copy_to_user(addrlen, &(int){sizeof(sa)}, sizeof(int));
+    return 0;
+}
+
+/* ================================================================
  * Dispatcher
  * ================================================================ */
 
@@ -566,14 +1127,15 @@ long handle_syscall(int num, uint64_t a1, uint64_t a2, uint64_t a3,
         case SYS_WRITE:   ret = sys_write((int)a1, (const void *)a2, (size_t)a3); break;
         case SYS_OPEN:    ret = sys_open((const char *)a1, (int)a2); break;
         case SYS_CLOSE:   ret = sys_close((int)a1); break;
-        case SYS_DUP:     ret = sys_dup((int)a1); break;
-        case SYS_DUP2:    ret = sys_dup2((int)a1, (int)a2); break;
-        case SYS_GETDENTS:ret = sys_getdents((int)a1, (void *)a2, (size_t)a3); break;
-        case SYS_LSEEK:   ret = sys_lseek((int)a1, (off_t)a2, (int)a3); break;
+        case SYS_STAT:    ret = sys_stat((const char *)a1, (struct kstat_ext *)a2); break;
         case SYS_FSTAT:   ret = sys_fstat((int)a1, (struct kstat *)a2); break;
+        case SYS_LSEEK:   ret = sys_lseek((int)a1, (off_t)a2, (int)a3); break;
         case SYS_MMAP:    ret = sys_mmap((void *)a1, (size_t)a2, (int)a3,
                                          (int)a4, (int)a5, (off_t)a6); break;
         case SYS_MPROTECT: ret = sys_mprotect((void *)a1, (size_t)a2, (int)a3); break;
+        case SYS_DUP:     ret = sys_dup((int)a1); break;
+        case SYS_DUP2:    ret = sys_dup2((int)a1, (int)a2); break;
+        case SYS_GETDENTS:ret = sys_getdents((int)a1, (void *)a2, (size_t)a3); break;
         case SYS_EXECVE:  ret = sys_execve((const char *)a1, (char *const *)a2, (char *const *)a3); break;
         case SYS_EXIT:    ret = sys_exit((int)a1); break;
         case SYS_GETPID:  ret = sys_getpid(); break;
@@ -587,6 +1149,32 @@ long handle_syscall(int num, uint64_t a1, uint64_t a2, uint64_t a3,
         case SYS_TIMES:   ret = sys_times((struct tms *)a1); break;
         case SYS_GETCWD:  ret = sys_getcwd((char *)a1, (size_t)a2); break;
         case SYS_CHDIR:   ret = sys_chdir((const char *)a1); break;
+        /* Network syscalls */
+        case SYS_SOCKET:  ret = sys_socket((int)a1, (int)a2, (int)a3); break;
+        case SYS_BIND:    ret = sys_bind((int)a1, (const struct sockaddr_in *)a2, (int)a3); break;
+        case SYS_CONNECT: ret = sys_connect((int)a1, (const struct sockaddr_in *)a2, (int)a3); break;
+        case SYS_LISTEN:  ret = sys_listen((int)a1, (int)a2); break;
+        case SYS_ACCEPT:  ret = sys_accept((int)a1, (struct sockaddr_in *)a2, (int *)a3); break;
+        case SYS_SEND:    ret = sys_send((int)a1, (const void *)a2, (size_t)a3, (int)a4); break;
+        case SYS_RECV:    ret = sys_recv((int)a1, (void *)a2, (size_t)a3, (int)a4); break;
+        case SYS_SENDTO:  ret = sys_sendto((int)a1, (const void *)a2, (size_t)a3, (int)a4, (const struct sockaddr_in *)a5, (int)a6); break;
+        case SYS_RECVFROM: ret = sys_recvfrom((int)a1, (void *)a2, (size_t)a3, (int)a4, (struct sockaddr_in *)a5, (int *)a6); break;
+        /* Time syscalls */
+        case SYS_GETTIMEOFDAY: ret = sys_gettimeofday((struct timeval *)a1, (void *)a2); break;
+        case SYS_NANOSLEEP: ret = sys_nanosleep((const struct timespec *)a1, (struct timespec *)a2); break;
+        /* Filesystem management syscalls */
+        case SYS_MKDIR:  ret = sys_mkdir((const char *)a1, (int)a2); break;
+        case SYS_RMDIR:  ret = sys_rmdir((const char *)a1); break;
+        case SYS_UNLINK: ret = sys_unlink((const char *)a1); break;
+        case SYS_RENAME: ret = sys_rename((const char *)a1, (const char *)a2); break;
+        case SYS_CHMOD:  ret = sys_chmod((const char *)a1, (int)a2); break;
+        /* Device control */
+        case SYS_IOCTL:  ret = sys_ioctl((int)a1, (int)a2, (void *)a3); break;
+        /* I/O multiplexing */
+        case SYS_POLL:   ret = sys_poll((struct pollfd *)a1, (int)a2, (int)a3); break;
+        /* Socket management */
+        case SYS_SHUTDOWN: ret = sys_shutdown((int)a1, (int)a2); break;
+        case SYS_GETSOCKNAME: ret = sys_getsockname((int)a1, (struct sockaddr_in *)a2, (int *)a3); break;
         default:
             current->t_errno = ENOSYS;
             ret = -1;

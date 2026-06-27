@@ -24,6 +24,8 @@
 #define DEV_TYPE_ZERO    1
 #define DEV_TYPE_CONSOLE 2
 #define DEV_TYPE_TTY     3
+#define DEV_TYPE_RANDOM  4
+#define DEV_TYPE_URANDOM 5
 
 struct dev_entry {
     const char *name;
@@ -45,6 +47,8 @@ static struct dev_entry dev_entries[] = {
     { "zero",    DEV_TYPE_ZERO    },
     { "console", DEV_TYPE_CONSOLE },
     { "tty",     DEV_TYPE_TTY     },
+    { "random",  DEV_TYPE_RANDOM  },
+    { "urandom", DEV_TYPE_URANDOM },
     { NULL,      0                },  /* sentinel */
 };
 
@@ -121,6 +125,64 @@ static ssize_t dev_console_write(struct file *filp, const void *buf, size_t coun
     return (ssize_t)count;
 }
 
+/*
+ * rdrand32: Get a 32-bit random value using RDRAND instruction.
+ * Returns 1 on success, 0 if RDRAND is not available or failed.
+ */
+static int rdrand32(uint32_t *val) {
+    int ok = 0;
+    asm volatile (
+        "1:\n\t"
+        "rdrand %0\n\t"
+        "setc %1\n\t"
+        "jnc 1b\n\t"
+        : "=r"(*val), "=qm"(ok)
+        :
+        : "cc"
+    );
+    return ok;
+}
+
+/*
+ * dev_random_read: Read random bytes using RDRAND.
+ * Blocks until enough random bytes are available (for /dev/random).
+ */
+static ssize_t dev_random_read(struct file *filp, void *buf, size_t count,
+                                off_t *offset, int blocking) {
+    (void)filp; (void)offset;
+    if (!buf || count == 0) return 0;
+
+    uint8_t *dst = (uint8_t *)buf;
+    size_t remaining = count;
+
+    while (remaining > 0) {
+        uint32_t rand_val;
+        if (!rdrand32(&rand_val)) {
+            if (blocking) {
+                /* For /dev/random, retry on failure */
+                continue;
+            }
+            /* For /dev/urandom, stop on failure */
+            break;
+        }
+        size_t copy = (remaining < 4) ? remaining : 4;
+        memcpy(dst, &rand_val, copy);
+        dst += copy;
+        remaining -= copy;
+    }
+
+    return (ssize_t)(count - remaining);
+}
+
+/*
+ * dev_random_write: Discard data (like /dev/null).
+ */
+static ssize_t dev_random_write(struct file *filp, const void *buf, size_t count,
+                                off_t *offset) {
+    (void)filp; (void)buf; (void)offset;
+    return (ssize_t)count;
+}
+
 /* ================================================================
  * Devtmpfs file operations
  * ================================================================ */
@@ -143,6 +205,8 @@ static ssize_t devtmpfs_read(struct file *filp, void *buf, size_t count,
         case DEV_TYPE_ZERO:    return dev_zero_read(filp, buf, count, offset);
         case DEV_TYPE_CONSOLE: return dev_console_read(filp, buf, count, offset);
         case DEV_TYPE_TTY:     return dev_console_read(filp, buf, count, offset);
+        case DEV_TYPE_RANDOM:  return dev_random_read(filp, buf, count, offset, 1);
+        case DEV_TYPE_URANDOM: return dev_random_read(filp, buf, count, offset, 0);
         default:               return -1;
     }
 }
@@ -160,6 +224,8 @@ static ssize_t devtmpfs_write(struct file *filp, const void *buf, size_t count,
         case DEV_TYPE_ZERO:    return dev_zero_write(filp, buf, count, offset);
         case DEV_TYPE_CONSOLE: return dev_console_write(filp, buf, count, offset);
         case DEV_TYPE_TTY:     return dev_console_write(filp, buf, count, offset);
+        case DEV_TYPE_RANDOM:  return dev_random_write(filp, buf, count, offset);
+        case DEV_TYPE_URANDOM: return dev_random_write(filp, buf, count, offset);
         default:               return -1;
     }
 }

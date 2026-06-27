@@ -969,3 +969,7 @@ int console_getline(char *buf, size_t buflen) {
     line_ready = 0;
     return (int)tocopy;
 }
+
+int console_has_input(void) {
+    return line_ready;
+}

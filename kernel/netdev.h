@@ -35,6 +35,7 @@ struct net_device {
  * ================================================================ */
 int  netdev_register(struct net_device *netdev);
 struct net_device *netdev_find(const char *name);
+struct net_device *netdev_get_first(void);
 int  netdev_send(struct net_device *netdev, const void *data, int len);
 int  netdev_recv(struct net_device *netdev, void *buf, int max_len);
 

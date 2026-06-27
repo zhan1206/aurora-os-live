@@ -20,6 +20,14 @@ struct file_ops {
     int (*close)(struct inode *inode, struct file *filp);
     /* Directory operations (for directory inodes) */
     int (*lookup)(struct inode *dir, struct dentry *dentry);
+    int (*create)(struct inode *dir, const char *name, int flags);
+    int (*mkdir)(struct inode *dir, const char *name);
+    int (*rmdir)(struct inode *dir, const char *name);
+    int (*unlink)(struct inode *dir, const char *name);
+    int (*rename)(struct inode *olddir, const char *oldname,
+                  struct inode *newdir, const char *newname);
+    int (*chmod)(struct inode *inode, int mode);
+    int (*ioctl)(struct inode *inode, int request, void *arg);
 };
 
 /* Inode: filesystem object */
@@ -44,6 +52,14 @@ struct dentry {
     int              refcount;
     int              access_count; /* access count for LRU aging */
 };
+
+/* File open flags */
+#define O_RDONLY  0
+#define O_WRONLY  1
+#define O_RDWR    2
+#define O_CREAT   0100
+#define O_TRUNC   01000
+#define O_APPEND  02000
 
 /* Open file description */
 struct file {

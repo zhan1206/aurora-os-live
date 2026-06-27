@@ -58,6 +58,45 @@ static int ramfs_lookup(struct inode *dir, struct dentry *dentry) {
 }
 
 /*
+ * ramfs_create: Create a new file in a ramfs directory.
+ * Called when O_CREAT is specified and the file does not exist.
+ * Returns 0 on success, -1 on failure.
+ */
+static int ramfs_create(struct inode *dir, const char *name, int flags) {
+    (void)flags;
+    struct ramfs_node *head = (struct ramfs_node *)dir;
+    if (!head || !head->inode.is_dir || !name) return -1;
+
+    /* Check for duplicate name */
+    struct ramfs_node *existing = head->next;
+    while (existing) {
+        if (existing->inode.name && strcmp(existing->inode.name, name) == 0)
+            return -1;  /* Already exists */
+        existing = existing->next;
+    }
+
+    struct ramfs_node *n = (struct ramfs_node *)kmalloc(sizeof(*n));
+    if (!n) return -1;
+    memset(n, 0, sizeof(*n));
+
+    n->inode.name = (const char *)kmalloc(strlen(name) + 1);
+    if (!n->inode.name) { kfree(n); return -1; }
+    strcpy((char *)n->inode.name, name);
+
+    n->inode.size   = 0;
+    n->inode.data   = NULL;
+    n->inode.ops    = &ramfs_file_ops;
+    n->inode.is_dir = 0;
+    n->inode.priv   = NULL;
+
+    /* Insert at head of directory listing */
+    n->next = head->next;
+    head->next = n;
+
+    return 0;
+}
+
+/*
  * ramfs_write: Write data to a ramfs file.
  * If the write extends beyond current file size, the buffer is expanded.
  */
@@ -96,6 +135,7 @@ static struct file_ops ramfs_dir_ops = {
     .write  = NULL,
     .close  = ramfs_close,
     .lookup = ramfs_lookup,
+    .create = ramfs_create,
 };
 
 /* ================================================================

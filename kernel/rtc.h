@@ -40,4 +40,8 @@ int rtc_format_time(char *buf, size_t bufsize);
  * Returns 0 on success, -1 on RTC error. */
 int rtc_format_date(char *buf, size_t bufsize);
 
+/* Get time as seconds + microseconds since epoch (for gettimeofday).
+ * Fills tv_sec and tv_usec with the current time approximated from RTC. */
+void rtc_get_timeval(uint64_t *tv_sec, uint64_t *tv_usec);
+
 #endif /* RTC_H */

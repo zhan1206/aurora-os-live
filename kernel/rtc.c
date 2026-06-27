@@ -178,3 +178,35 @@ int rtc_format_date(char *buf, size_t bufsize) {
     buf[n] = '\0';
     return 0;
 }
+
+/* ================================================================
+ * rtc_get_timeval: Get time as seconds + microseconds for gettimeofday
+ *
+ * Approximates the current time from the RTC and uptime counter.
+ * The RTC provides the base time at boot, and we add the uptime.
+ * ================================================================ */
+void rtc_get_timeval(uint64_t *tv_sec, uint64_t *tv_usec) {
+    if (!tv_sec || !tv_usec) return;
+
+    struct rtc_time tm;
+    if (rtc_read_time(&tm) == 0) {
+        uint64_t days = 0;
+        for (uint16_t y = 2020; y < tm.year; y++) {
+            days += 365;
+            if ((y % 4 == 0 && y % 100 != 0) || (y % 400 == 0))
+                days++;
+        }
+        static const uint16_t month_days[] = {0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334};
+        days += month_days[tm.month - 1];
+        if (tm.month > 2 && ((tm.year % 4 == 0 && tm.year % 100 != 0) || (tm.year % 400 == 0)))
+            days++;
+        days += tm.day - 1;
+
+        *tv_sec = days * 86400 + tm.hour * 3600 + tm.minute * 60 + tm.second;
+        *tv_sec += g_uptime_seconds;
+        *tv_usec = 0;
+    } else {
+        *tv_sec = g_uptime_seconds;
+        *tv_usec = 0;
+    }
+}

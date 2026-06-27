@@ -139,3 +139,109 @@ char *strncpy(char *dst, const char *src, size_t n) {
         dst[i] = '\0';
     return dst;
 }
+
+/* Simple snprintf — supports %s, %d, %u, %x, %p, %c */
+#include <stdarg.h>
+
+static int sn_write_char(char *buf, size_t size, size_t *pos, char c) {
+    if (*pos + 1 < size) {
+        buf[*pos] = c;
+    }
+    (*pos)++;
+    return 1;
+}
+
+static int sn_write_str(char *buf, size_t size, size_t *pos, const char *s) {
+    if (!s) s = "(null)";
+    int written = 0;
+    while (*s) {
+        sn_write_char(buf, size, pos, *s++);
+        written++;
+    }
+    return written;
+}
+
+static int sn_write_uint(char *buf, size_t size, size_t *pos, uint64_t val, int base) {
+    char tmp[21];
+    int tn = 0;
+    if (val == 0) tmp[tn++] = '0';
+    while (val > 0 && tn < 20) {
+        int digit = (int)(val % (uint64_t)base);
+        tmp[tn++] = (char)(digit < 10 ? '0' + digit : 'a' + digit - 10);
+        val /= (uint64_t)base;
+    }
+    int written = 0;
+    for (int i = tn - 1; i >= 0; i--) {
+        sn_write_char(buf, size, pos, tmp[i]);
+        written++;
+    }
+    return written;
+}
+
+int snprintf(char *buf, size_t size, const char *fmt, ...) {
+    if (!buf || size == 0) return 0;
+    if (!fmt) {
+        buf[0] = '\0';
+        return 0;
+    }
+
+    va_list ap;
+    va_start(ap, fmt);
+    size_t pos = 0;
+    const char *p = fmt;
+
+    while (*p && pos < size) {
+        if (*p != '%') {
+            sn_write_char(buf, size, &pos, *p++);
+            continue;
+        }
+        p++; /* skip '%' */
+
+        if (*p == 's') {
+            const char *s = va_arg(ap, const char *);
+            sn_write_str(buf, size, &pos, s);
+            p++;
+        } else if (*p == 'd') {
+            int val = va_arg(ap, int);
+            if (val < 0) {
+                sn_write_char(buf, size, &pos, '-');
+                sn_write_uint(buf, size, &pos, (uint64_t)(-(val + 1)) + 1, 10);
+            } else {
+                sn_write_uint(buf, size, &pos, (uint64_t)val, 10);
+            }
+            p++;
+        } else if (*p == 'u') {
+            uint64_t val = va_arg(ap, uint64_t);
+            sn_write_uint(buf, size, &pos, val, 10);
+            p++;
+        } else if (*p == 'x') {
+            uint64_t val = va_arg(ap, uint64_t);
+            sn_write_uint(buf, size, &pos, val, 16);
+            p++;
+        } else if (*p == 'p') {
+            uint64_t val = (uint64_t)(uintptr_t)va_arg(ap, void *);
+            if (val == 0) {
+                sn_write_str(buf, size, &pos, "(nil)");
+            } else {
+                sn_write_str(buf, size, &pos, "0x");
+                sn_write_uint(buf, size, &pos, val, 16);
+            }
+            p++;
+        } else if (*p == 'c') {
+            char c = (char)va_arg(ap, int);
+            sn_write_char(buf, size, &pos, c);
+            p++;
+        } else if (*p == '%') {
+            sn_write_char(buf, size, &pos, '%');
+            p++;
+        } else {
+            /* Unknown format specifier — print as-is */
+            sn_write_char(buf, size, &pos, '%');
+            if (*p) sn_write_char(buf, size, &pos, *p++);
+        }
+    }
+
+    buf[pos < size ? pos : size - 1] = '\0';
+    va_end(ap);
+    return (int)pos;
+}

@@ -762,7 +762,10 @@ void *kmalloc(size_t size) {
     }
 
     /* Large allocation: use page allocator directly */
-    /* Align size to page boundary, calculate order */
+    /* Align size to page boundary, calculate order.
+     * Guard against integer overflow: if size + PAGE_SIZE - 1 overflows,
+     * the allocation is impossibly large (close to SIZE_MAX). */
+    if (size > SIZE_MAX - PAGE_SIZE) return NULL;
     size_t pages_needed = (size + PAGE_SIZE - 1) / PAGE_SIZE;
     uint32_t order = 0;
     while ((1ULL << order) < pages_needed && order <= MAX_ORDER) order++;

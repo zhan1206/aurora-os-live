@@ -8,6 +8,8 @@
 #include "include/kstdio.h"
 #include "include/theme.h"
 #include "include/version.h"
+#include "include/net.h"
+#include "include/fat32.h"
 #include "layout.h"
 #include "mem.h"
 #include "sched.h"
@@ -28,6 +30,7 @@
 #include "aslr.h"
 #include "module.h"
 #include "rtc.h"
+#include "cmdline.h"
 #include "../boot/boot_info.h"
 
 /* ================================================================
@@ -146,6 +149,9 @@ void kernel_main(uint32_t magic, void *mb_info) {
     /* Stack protector must be initialized before any C code with stack arrays */
     stack_protect_init();
 
+    /* Initialize kernel command line */
+    cmdline_init("auroraos console=tty0 root=/dev/ram0 quiet");
+
     /* === Phase 1: Boot Splash Screen === */
     if (is_uefi && uefi_bi->fb_valid) {
         console_init_fb(uefi_bi->fb_addr, uefi_bi->fb_width, uefi_bi->fb_height,
@@ -179,7 +185,7 @@ void kernel_main(uint32_t magic, void *mb_info) {
     console_write_ansi(SGR_RESET);
     console_vpad(1);
 
-    int boot_step = 0, boot_total = 16;
+    int boot_step = 0, boot_total = 18;
     #define BOOT_STEP() do { \
         boot_step++; \
         console_write_ansi(BOOT_PROGRESS_FILL); \
@@ -297,6 +303,28 @@ void kernel_main(uint32_t magic, void *mb_info) {
 
     module_init();
     console_status_ok("Module loader (kernel symbol table)");
+    BOOT_STEP();
+
+    /* === Phase 3.6: Network Stack === */
+    net_init();
+    console_status_ok("TCP/IP network stack (ARP/IPv4/ICMP/UDP/TCP)");
+    BOOT_STEP();
+
+    /* === Phase 3.7: FAT32 Filesystem === */
+    {
+        struct block_device *fat32_bdev = block_dev_find("ramdisk0");
+        if (fat32_bdev) {
+            struct super_block *fat32_sb = fat32_mount(fat32_bdev);
+            if (fat32_sb) {
+                vfs_mount("/fat32", fat32_sb);
+                console_status_ok("FAT32 filesystem mounted at /fat32");
+            } else {
+                console_status_ok("FAT32 mount skipped (not a FAT32 image)");
+            }
+        } else {
+            console_status_ok("FAT32 mount skipped (no block device)");
+        }
+    }
     BOOT_STEP();
 
     #undef BOOT_STEP

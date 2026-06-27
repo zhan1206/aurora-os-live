@@ -37,6 +37,21 @@
 #define ERANGE   34   /* Math result not representable */
 #define ENOTSOCK 88   /* Socket operation on non-socket */
 #define EOVERFLOW 75  /* Value too large for defined data type */
+#define EAFNOSUPPORT 97   /* Address family not supported */
+#define EPROTONOSUPPORT 93 /* Protocol not supported */
+#define EADDRINUSE 98  /* Address already in use */
+#define ECONNREFUSED 111 /* Connection refused */
+#define ECONNRESET 104 /* Connection reset by peer */
+#define ENETUNREACH 101 /* Network is unreachable */
+#define ETIMEDOUT 110  /* Connection timed out */
+#define EADDRNOTAVAIL 99 /* Cannot assign requested address */
+#define ENOTEMPTY 39   /* Directory not empty */
+#define EROFS    30    /* Read-only file system */
+#define EXDEV    18    /* Cross-device link */
+#define ENODATA  61    /* No data available */
+#define EISCONN  106   /* Transport endpoint is already connected */
+#define ENOTCONN 107   /* Transport endpoint is not connected */
+#define ESHUTDOWN 108  /* Cannot send after transport endpoint shutdown */
 
 /* Per-task error number — accessed via current->t_errno in task_struct */
 /* (see sched.h for the task_struct definition) */

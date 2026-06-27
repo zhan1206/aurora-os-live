@@ -93,6 +93,9 @@ struct task_struct {
     /* --- Error handling --- */
     int       t_errno;         /* per-task errno (thread-safe) */
 
+    /* --- Sleep/wakeup --- */
+    uint64_t  sleep_until;     /* absolute tick when this task should wake up (0 = not sleeping) */
+
     /* --- Security --- */
     struct seccomp_filter *seccomp;  /* syscall filter (NULL = all allowed) */
 };
