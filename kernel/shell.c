@@ -1364,19 +1364,17 @@ static void do_rm_cmd(const char *args) {
         console_error_with_hint("rm", "Usage: rm <filename>");
         return;
     }
-    struct inode *ino = vfs_lookup(args);
-    if (ino) {
-        console_write_ansi(SHELL_CMD_WARN);
-        console_write("rm: '");
+    if (vfs_unlink(args) == 0) {
+        console_write_ansi(SHELL_CMD_OK);
+        console_write("Removed: ");
         console_write(args);
-        console_write("' exists but unlink not yet implemented");
         console_write_ansi(SGR_RESET);
         console_putc('\n');
     } else {
         console_write_ansi(SHELL_CMD_ERROR);
         console_write("rm: cannot remove '");
         console_write(args);
-        console_write("': No such file");
+        console_write("': No such file or directory");
         console_write_ansi(SGR_RESET);
         console_putc('\n');
     }

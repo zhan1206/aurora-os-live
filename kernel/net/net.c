@@ -302,6 +302,7 @@ static uint16_t ip_id_counter = 0;
 
 int ip_send(const uint8_t dst_ip[4], uint8_t protocol,
             const void *data, uint16_t len) {
+    if (!data && len > 0) return -1;
     struct net_if *iface = net_if_find_by_ip(dst_ip);
     if (!iface) {
         /* Use first available interface */
@@ -498,6 +499,8 @@ static void udp_handle_packet(const uint8_t src_ip[4],
 
 int udp_recvfrom(uint16_t port, void *buf, int max_len,
                   uint8_t src_ip[4], uint16_t *src_port) {
+    if (!buf || max_len < 0) return -1;
+
     spin_lock(&udp_lock);
 
     int i;
@@ -587,6 +590,7 @@ static struct tcp_socket *tcp_find_by_addr(const uint8_t src_ip[4],
 
 static int tcp_send_packet(struct tcp_socket *sock, uint8_t flags,
                             const void *data, int data_len) {
+    if (data_len < 0) return -1;
     struct net_if *iface = net_if_find_by_ip(sock->remote_ip);
     if (!iface || !iface->netdev) return -1;
 

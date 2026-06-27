@@ -298,6 +298,9 @@ static long sys_mmap(void *addr, size_t length, int prot, int flags,
     }
     if (length == 0) { current->t_errno = EINVAL; return -1; }
 
+    /* Guard against overflow in page count calculation */
+    if (length > SIZE_MAX - PAGE_SIZE + 1) { current->t_errno = ENOMEM; return -1; }
+
     /* Align length to page size */
     size_t num_pages = (length + PAGE_SIZE - 1) / PAGE_SIZE;
     uint64_t map_va = 0x60000000ULL; /* Fixed mapping region for now */
@@ -1015,13 +1018,15 @@ static long sys_ioctl(int fd, int request, void *arg) {
  * ================================================================ */
 static long sys_poll(struct pollfd *fds, int nfds, int timeout) {
     if (!fds || nfds <= 0) { current->t_errno = EINVAL; return -1; }
+
+    /* Guard against overflow in multiplication */
+    if (nfds > 16) nfds = 16;
     if (!user_addr_range_ok(fds, (size_t)nfds * sizeof(struct pollfd))) {
         current->t_errno = EFAULT; return -1;
     }
 
     /* Simple poll: check each fd for readability */
     struct pollfd kfds[16];
-    if (nfds > 16) nfds = 16;
     if (copy_from_user(kfds, fds, (size_t)nfds * sizeof(struct pollfd)) != 0) {
         current->t_errno = EFAULT; return -1;
     }

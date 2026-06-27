@@ -105,7 +105,16 @@ static ssize_t ramfs_write(struct file *filp, const void *buf, size_t count,
     struct ramfs_node *n = (struct ramfs_node *)filp->inode;
     if (!n || !buf || !offset) return -1;
 
+    /* Guard against negative offset */
+    if (*offset < 0) return -1;
+
+    /* No-op write */
+    if (count == 0) return 0;
+
+    /* Check for integer overflow: (size_t)(*offset) + count */
+    if ((size_t)(*offset) > SIZE_MAX - count) return -1;
     size_t new_size = (size_t)(*offset) + count;
+
     if (new_size > n->inode.size) {
         /* Expand buffer */
         char *new_data = (char *)kmalloc(new_size);
@@ -116,6 +125,7 @@ static ssize_t ramfs_write(struct file *filp, const void *buf, size_t count,
         n->data = new_data;
         n->inode.size = new_size;
     }
+
     memcpy(n->data + (*offset), buf, count);
     *offset += (off_t)count;
     return (ssize_t)count;

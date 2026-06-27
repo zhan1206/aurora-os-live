@@ -193,44 +193,33 @@ int vfs_mount(const char *path, struct super_block *sb) {
     if (path[0] != '/')
         return -1;
 
-    /* Find the parent directory and the mount point name */
+    /* Find the last slash in the path */
     const char *last_slash = NULL;
     for (const char *p = path; *p; p++) {
         if (*p == '/') last_slash = p;
     }
+    /* Since path[0] == '/', last_slash is always at least path */
 
-    const char *mount_name;
-    struct dentry *parent_dentry;
-
-    if (last_slash == path) {
-        /* Mounting at root level, e.g., "/proc" */
-        mount_name = path + 1;
-        parent_dentry = root_dentry;
-    } else {
-        /* Mounting at a deeper path — resolve the parent */
-        mount_name = last_slash + 1;
-        /* We need to look up the parent. For simplicity, only support
-         * single-level paths like "/proc". */
-        if (last_slash != path) {
-            /* Parent is not root — not supported for now */
-            log_printf(LOG_LEVEL_WARN, "VFS: vfs_mount only supports root-level mounts\n");
-            return -1;
-        }
-        parent_dentry = root_dentry;
+    /* We only support root-level mounts like "/proc", "/dev" */
+    if (last_slash != path) {
+        log_printf(LOG_LEVEL_WARN, "VFS: vfs_mount only supports root-level mounts\n");
+        return -1;
     }
 
-    if (!mount_name || *mount_name == '\0')
+    /* Mounting at root level */
+    const char *mount_name = path + 1;
+    if (*mount_name == '\0')
         return -1;
 
     /* Check if already mounted */
-    struct dentry *existing = dentry_lookup_child(parent_dentry, mount_name);
+    struct dentry *existing = dentry_lookup_child(root_dentry, mount_name);
     if (existing && existing->inode) {
         log_printf(LOG_LEVEL_WARN, "VFS: mount point '%s' already exists\n", path);
         return -1;
     }
 
     /* Create dentry for the mount point */
-    struct dentry *mount_dentry = dentry_alloc(mount_name, parent_dentry);
+    struct dentry *mount_dentry = dentry_alloc(mount_name, root_dentry);
     if (!mount_dentry) return -1;
 
     /* Associate with the superblock's root inode */
@@ -238,8 +227,8 @@ int vfs_mount(const char *path, struct super_block *sb) {
     sb->root->dentry = mount_dentry;
     sb->root_dentry = mount_dentry;
 
-    /* Add to parent's children */
-    dentry_add_child(parent_dentry, mount_dentry);
+    /* Add to root's children */
+    dentry_add_child(root_dentry, mount_dentry);
 
     log_printf(LOG_LEVEL_INFO, "VFS: mounted '%s' at '%s'\n", sb->fs_name, path);
     return 0;
