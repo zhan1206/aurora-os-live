@@ -34,5 +34,10 @@ userspace/shell
 .codebuddy/
 .trae/
 
+# Temporary and backup files
+*.bak
+*.tmp
+*.orig
+
 # OS files
 desktop.ini

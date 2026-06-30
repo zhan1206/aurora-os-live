@@ -11,8 +11,6 @@
 #    ./build.sh clean        - Clean build artifacts
 #    ./build.sh format       - Format source code
 #    ./build.sh test         - Build and run self-tests in QEMU
-#    ./build.sh cmake        - Build using CMake (Release)
-#    ./build.sh cmake-debug  - Build using CMake (Debug)
 #    ./build.sh docker       - Build using Docker
 # =============================================================================
 
@@ -112,14 +110,6 @@ do_test() {
     fi
 }
 
-do_cmake() {
-    local build_type="${1:-Release}"
-    info "Building with CMake (${build_type})..."
-    cmake -S . -B build -DCMAKE_BUILD_TYPE="${build_type}" -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
-    cmake --build build
-    ok "CMake build complete"
-}
-
 do_docker() {
     info "Building with Docker..."
     if ! command -v docker &>/dev/null; then
@@ -151,12 +141,6 @@ case "${1:-}" in
     test)
         do_test
         ;;
-    cmake)
-        do_cmake "Release"
-        ;;
-    cmake-debug)
-        do_cmake "Debug"
-        ;;
     docker)
         do_docker
         ;;
@@ -172,8 +156,6 @@ case "${1:-}" in
         echo "  clean         Clean build artifacts"
         echo "  format        Format source code"
         echo "  test          Build and run self-tests in QEMU"
-        echo "  cmake         Build using CMake (Release)"
-        echo "  cmake-debug   Build using CMake (Debug)"
         echo "  docker        Build using Docker"
         echo "  help          Show this help"
         ;;

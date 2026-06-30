@@ -120,19 +120,19 @@ void *elf_load(const char *path, uint64_t *pml4_out) {
             if (toread > remaining) toread = remaining;
 
             /* Walk page table to find physical page (with PRESENT checks) */
-            uint64_t *pml4 = (uint64_t*)phys_to_virt(new_pml4);
+            uint64_t *pml4 = phys_to_virt(new_pml4);
             uint64_t pml4_idx = (page_vbase >> 39) & 0x1FF;
             if (!(pml4[pml4_idx] & PTE_PRESENT)) break;
             uint64_t pdpt_phys = pml4[pml4_idx] & PTE_ADDR_MASK;
-            uint64_t *pdpt = (uint64_t*)(uintptr_t)pdpt_phys;
+            uint64_t *pdpt = phys_to_virt(pdpt_phys);
             uint64_t pdpt_idx = (page_vbase >> 30) & 0x1FF;
             if (!(pdpt[pdpt_idx] & PTE_PRESENT)) break;
             uint64_t pd_phys = pdpt[pdpt_idx] & PTE_ADDR_MASK;
-            uint64_t *pd = (uint64_t*)(uintptr_t)pd_phys;
+            uint64_t *pd = phys_to_virt(pd_phys);
             uint64_t pd_idx = (page_vbase >> 21) & 0x1FF;
             if (!(pd[pd_idx] & PTE_PRESENT)) break;
             uint64_t pt_phys = pd[pd_idx] & PTE_ADDR_MASK;
-            uint64_t *pt = (uint64_t*)(uintptr_t)pt_phys;
+            uint64_t *pt = phys_to_virt(pt_phys);
             uint64_t pt_idx = (page_vbase >> 12) & 0x1FF;
             if (!(pt[pt_idx] & PTE_PRESENT)) break;
             uint64_t phys_page = pt[pt_idx] & PTE_ADDR_MASK;

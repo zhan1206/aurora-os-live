@@ -275,7 +275,7 @@ static int read_self_maps(char *buf, size_t size) {
     if (!current) return -1;
 
     int len = 0;
-    uint64_t *pml4 = (uint64_t *)(uintptr_t)current->cr3;
+    uint64_t *pml4 = phys_to_virt(current->cr3);
 
     /* Walk the page table to find contiguous mapped regions */
     uint64_t region_start = 0;
@@ -294,14 +294,14 @@ static int read_self_maps(char *buf, size_t size) {
             continue;
         }
 
-        uint64_t *pdpt = (uint64_t *)(uintptr_t)(pml4[pml4_idx] & PTE_ADDR_MASK);
+        uint64_t *pdpt = phys_to_virt(pml4[pml4_idx] & PTE_ADDR_MASK);
         uint64_t pdpt_idx = (va >> 30) & 0x1FF;
         if (!(pdpt[pdpt_idx] & PTE_PRESENT)) {
             va += (1ULL << 30) - PAGE_SIZE;
             continue;
         }
 
-        uint64_t *pd = (uint64_t *)(uintptr_t)(pdpt[pdpt_idx] & PTE_ADDR_MASK);
+        uint64_t *pd = phys_to_virt(pdpt[pdpt_idx] & PTE_ADDR_MASK);
         uint64_t pd_idx = (va >> 21) & 0x1FF;
         if (!(pd[pd_idx] & PTE_PRESENT)) {
             va += (1ULL << 21) - PAGE_SIZE;
@@ -337,7 +337,7 @@ static int read_self_maps(char *buf, size_t size) {
             continue;
         }
 
-        uint64_t *pt = (uint64_t *)(uintptr_t)(pd[pd_idx] & PTE_ADDR_MASK);
+        uint64_t *pt = phys_to_virt(pd[pd_idx] & PTE_ADDR_MASK);
         uint64_t pt_idx = (va >> 12) & 0x1FF;
 
         if (pt[pt_idx] & PTE_PRESENT) {
