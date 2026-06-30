@@ -434,8 +434,14 @@ static const char *state_colors[] = {
  * ================================================================ */
 static void print_int(int x) {
     char num[16];
-    if (x < 0) { console_putc('-'); x = -x; }
-    itoa(x, num, sizeof(num));
+    if (x < 0) {
+        console_putc('-');
+        /* Safe negation: handle INT_MIN by using unsigned arithmetic */
+        unsigned int ux = (unsigned int)(-(x + 1)) + 1U;
+        uitoa(ux, num, sizeof(num));
+    } else {
+        itoa(x, num, sizeof(num));
+    }
     console_write(num);
 }
 
