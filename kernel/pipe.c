@@ -75,16 +75,26 @@ static ssize_t pipe_read(struct file *filp, void *buf, size_t count,
     struct pipe_ring *ring = (struct pipe_ring *)filp->inode->priv;
     if (!ring) return -1;
 
-    /* Block until data available, write end closed, or signal */
-    while (ring->count == 0) {
-        if (!ring->write_open) return 0;  /* EOF */
+    /* Block until data available, write end closed, or signal.
+     * Use spinlock for SMP safety: protect ring buffer state checks
+     * and modifications from concurrent access by pipe_write/pipe_close. */
+    for (;;) {
+        pipe_spin_lock(&ring->lock);
+
+        if (ring->count > 0) break;  /* data available */
+        if (!ring->write_open) {
+            pipe_spin_unlock(&ring->lock);
+            return 0;  /* EOF */
+        }
+        pipe_spin_unlock(&ring->lock);
+
         if (!current) return -1;
         if (current->sig && current->sig->pending) { current->t_errno = EINTR; return -1; }
         current->state = TASK_BLOCKED;
         schedule();
     }
 
-    /* Read from ring buffer */
+    /* Read from ring buffer (lock still held) */
     size_t toread = count;
     if (toread > ring->count) toread = ring->count;
 
@@ -101,6 +111,7 @@ static ssize_t pipe_read(struct file *filp, void *buf, size_t count,
     ring->head = (ring->head + toread) % PIPE_BUF_SIZE;
     ring->count -= (uint32_t)toread;
 
+    pipe_spin_unlock(&ring->lock);
     return (ssize_t)toread;
 }
 
@@ -110,24 +121,35 @@ static ssize_t pipe_write(struct file *filp, const void *buf, size_t count,
     if (!filp || !filp->inode) return -1;
     struct pipe_ring *ring = (struct pipe_ring *)filp->inode->priv;
     if (!ring) return -1;
+
+    pipe_spin_lock(&ring->lock);
     if (!ring->read_open) {
-        /* Reader closed → SIGPIPE (simplified: return -1) */
-        return -1;
+        pipe_spin_unlock(&ring->lock);
+        return -1;  /* Reader closed → SIGPIPE */
     }
+    pipe_spin_unlock(&ring->lock);
 
     size_t total = 0;
     const char *src = (const char *)buf;
 
     while (total < count) {
-        /* Block if buffer is full */
-        while (ring->count >= PIPE_BUF_SIZE) {
-            if (!ring->read_open) { current->t_errno = EPIPE; return -1; }
+        /* Block if buffer is full (with SMP-safe spinlock) */
+        for (;;) {
+            pipe_spin_lock(&ring->lock);
+            if (ring->count < PIPE_BUF_SIZE) break;  /* space available */
+            if (!ring->read_open) {
+                pipe_spin_unlock(&ring->lock);
+                current->t_errno = EPIPE; return -1;
+            }
+            pipe_spin_unlock(&ring->lock);
+
             if (!current) return -1;
             if (current->sig && current->sig->pending) { current->t_errno = EINTR; return -1; }
             current->state = TASK_BLOCKED;
             schedule();
         }
 
+        /* lock still held: write to ring buffer */
         size_t space = PIPE_BUF_SIZE - ring->count;
         size_t towrite = count - total;
         if (towrite > space) towrite = space;
@@ -145,6 +167,7 @@ static ssize_t pipe_write(struct file *filp, const void *buf, size_t count,
         ring->tail = (ring->tail + towrite) % PIPE_BUF_SIZE;
         ring->count += (uint32_t)towrite;
 
+        pipe_spin_unlock(&ring->lock);
         total += towrite;
     }
 

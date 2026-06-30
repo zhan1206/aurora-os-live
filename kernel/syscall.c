@@ -122,13 +122,23 @@ static long sys_open(const char *path, int flags) {
             for (const char *p = kpath; *p; p++) {
                 if (*p == '/') last_slash = p;
             }
-            if (!last_slash || last_slash == kpath) {
+            /* last_slash must point to a valid directory separator.
+             * - NULL: no slash in path (e.g. "foo"), can't determine parent
+             * - points to kpath[0]: path starts with '/', parent is "/"
+             *   unless the path IS just "/" (no filename after slash) */
+            if (!last_slash) {
+                current->t_errno = EINVAL; return -1;
+            }
+            if (last_slash == kpath && *(last_slash + 1) == '\0') {
+                /* Path is just "/" — no filename to create */
                 current->t_errno = EINVAL; return -1;
             }
 
-            /* Extract parent path */
+            /* Extract parent path.
+             * For "/foo", parent is "/" (parent_len = 1).
+             * For "/dir/foo", parent is "/dir" (parent_len = slash_pos). */
             size_t parent_len = (size_t)(last_slash - kpath);
-            if (parent_len == 0) parent_len = 1;
+            if (parent_len == 0) parent_len = 1;  /* parent is "/" */
             char parent_path[256];
             if (parent_len >= sizeof(parent_path)) {
                 current->t_errno = ENAMETOOLONG; return -1;
@@ -1093,7 +1103,10 @@ static long sys_poll(struct pollfd *fds, int nfds, int timeout) {
         }
     }
 
-    /* If timeout and no fd ready, block briefly */
+    /* If timeout and no fd ready, block briefly.
+     * timeout == 0: return immediately (non-blocking poll).
+     * timeout < 0: block indefinitely (not supported yet, treat as 0).
+     * timeout > 0: block for at most timeout milliseconds. */
     if (ready == 0 && timeout > 0) {
         uint64_t target_ticks = (uint64_t)timeout / 10;
         if (target_ticks == 0) target_ticks = 1;
@@ -1101,6 +1114,7 @@ static long sys_poll(struct pollfd *fds, int nfds, int timeout) {
         current->state = TASK_BLOCKED;
         schedule();
     }
+    /* timeout <= 0: return immediately with whatever is ready (0) */
 
     if (copy_to_user(fds, kfds, (size_t)nfds * sizeof(struct pollfd)) != 0) {
         current->t_errno = EFAULT; return -1;

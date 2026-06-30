@@ -533,14 +533,17 @@ void do_exit_current(int code) {
         current->parent->state = TASK_READY;
     }
 
-    /* Remove from ready queue */
+    /* Remove from run queue (SMP-safe: acquire run queue lock to prevent
+     * races with smp_schedule() which may try to steal tasks from this CPU) */
     int cpu_id = current_cpu_id();
     struct run_queue *rq = &per_cpu_rq[cpu_id];
+    spin_lock(&rq->lock);
 
     struct task_struct *prev_node = current;
     while (prev_node->next != current) prev_node = prev_node->next;
 
     if (prev_node == current) {
+        spin_unlock(&rq->lock);
         log_printf(LOG_LEVEL_INFO, "do_exit_current: last task exiting, halting\n");
         for (;;) asm volatile ("cli; hlt");
     }
@@ -554,6 +557,8 @@ void do_exit_current(int code) {
 
     /* Decrement run queue count */
     if (rq->count > 0) rq->count--;
+
+    spin_unlock(&rq->lock);
 
     /*
      * IMPORTANT: Do NOT do our own context_switch here.

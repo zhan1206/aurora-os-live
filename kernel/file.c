@@ -83,7 +83,12 @@ int fd_dup(struct task_struct *t, int oldfd) {
     if (!f) return -1;
     /* Increment file refcount since both fds share the same file */
     vfs_file_dup((struct file *)f);
-    return fd_alloc(t, f);
+    int newfd = fd_alloc(t, f);
+    if (newfd < 0) {
+        /* Rollback: fd_alloc failed, undo the refcount increment */
+        vfs_close((struct file *)f);
+    }
+    return newfd;
 }
 
 /*
