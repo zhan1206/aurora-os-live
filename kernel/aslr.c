@@ -69,6 +69,9 @@ uint64_t aslr_randomize_base(uint64_t base, uint64_t max_shift) {
      * take modulo max_shift (in pages), then shift back.
      */
     uint64_t pages = max_shift / PAGE_SIZE;
+    /* Guard against division by zero: if max_shift < PAGE_SIZE,
+     * pages == 0 and xorshift64_next() % pages would #DE. */
+    if (pages == 0) return base;
     uint64_t offset_pages = xorshift64_next() % pages;
     uint64_t offset = offset_pages * PAGE_SIZE;
 

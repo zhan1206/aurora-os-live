@@ -121,7 +121,7 @@ uint64_t *phys_to_virt(uint64_t pa) {
 }
 
 /* Forward declaration: used by rodata_protect and map_page */
-static uint64_t split_huge_page(uint64_t *pd, int pd_idx);
+static uint64_t split_huge_page(uint64_t *pd, int pd_idx, uint64_t vaddr);
 
 void rodata_protect(void) {
     extern uint8_t __rodata_start[];
@@ -159,7 +159,7 @@ void rodata_protect(void) {
         /* Split 2MB huge page if needed */
         if (pd[pd_idx] & PTE_PS) {
             log_printf(LOG_LEVEL_DEBUG, "pagetable: rodata_protect: splitting huge page at pd[%d]\n", (int)pd_idx);
-            if (!split_huge_page(pd, (int)pd_idx)) continue;
+            if (!split_huge_page(pd, (int)pd_idx, va)) continue;
             log_printf(LOG_LEVEL_DEBUG, "pagetable: rodata_protect: split done\n");
         }
 
@@ -209,7 +209,7 @@ static uint32_t page_ref_get(uint64_t pa) {
  * @pd_idx:   index of the huge page entry in the PD
  * Returns:   physical address of the new PT, or 0 on failure.
  */
-static uint64_t split_huge_page(uint64_t *pd, int pd_idx) {
+static uint64_t split_huge_page(uint64_t *pd, int pd_idx, uint64_t vaddr) {
     uint64_t huge_entry = pd[pd_idx];
     if (!(huge_entry & PTE_PS)) return 0;  /* not a huge page */
 
@@ -238,11 +238,12 @@ static uint64_t split_huge_page(uint64_t *pd, int pd_idx) {
 
     /*
      * Flush the TLB for the entire 2MB region that was just split.
-     * The CPU may still have the old 2MB huge-page TLB entry cached.
-     * Without invlpg, subsequent accesses to this region might use the
-     * stale 2MB mapping instead of walking the new PT.
+     * Use the full virtual address (vaddr) aligned to the 2MB boundary,
+     * rather than assuming the huge page is at PDPT=0/PML4=0.
+     * Flush all 512 4KB pages in the 2MB region to ensure no stale
+     * 2MB TLB entries remain.
      */
-    uint64_t split_va = (uint64_t)pd_idx << 21;
+    uint64_t split_va = vaddr & ~0x1FFFFFULL;  /* 2MB-aligned */
     for (int i = 0; i < 512; i++) {
         invlpg(split_va + (uint64_t)i * 4096);
     }
@@ -294,7 +295,7 @@ int map_page(uint64_t pml4_phys, uint64_t vaddr, uint64_t paddr, uint64_t flags)
         pd[pd_idx] = pt_phys | PTE_STRUCT_FLAGS;
     } else if (entry & PTE_PS) {
         /* 2MB huge page: split into 512 × 4KB pages */
-        pt_phys = split_huge_page(pd, (int)pd_idx);
+        pt_phys = split_huge_page(pd, (int)pd_idx, vaddr);
         if (!pt_phys) return -1;
     } else {
         pt_phys = entry & PTE_ADDR_MASK;
@@ -656,7 +657,7 @@ void pf_handler_c(uint64_t error_code) {
 
         /* 2MB huge page in user space: split it, then handle the 4KB fault */
         if (pd[pd_idx] & PTE_PS) {
-            if (!split_huge_page(pd, (int)pd_idx)) goto unhandled;
+            if (!split_huge_page(pd, (int)pd_idx, cr2)) goto unhandled;
         }
 
         uint64_t *pt = phys_to_virt(pd[pd_idx] & PTE_ADDR_MASK);

@@ -28,6 +28,26 @@
 
 #define PIPE_BUF_SIZE 4096
 
+/* Simple spinlock for pipe SMP safety */
+static inline void pipe_spin_lock(volatile uint32_t *lock) {
+    while (1) {
+        uint32_t old = 0;
+        uint32_t new = 1;
+        asm volatile (
+            "lock cmpxchgl %2, %1"
+            : "=a"(old), "+m"(*lock)
+            : "r"(new), "0"(old)
+            : "memory"
+        );
+        if (old == 0) break;
+        asm volatile ("pause" ::: "memory");
+    }
+}
+
+static inline void pipe_spin_unlock(volatile uint32_t *lock) {
+    asm volatile ("movl $0, %0" : "=m"(*lock) : : "memory");
+}
+
 /* Pipe ring buffer */
 struct pipe_ring {
     char     buf[PIPE_BUF_SIZE];
@@ -36,6 +56,7 @@ struct pipe_ring {
     uint32_t count;       /* bytes in buffer */
     int      read_open;   /* read end still open? */
     int      write_open;  /* write end still open? */
+    volatile uint32_t lock;  /* spinlock for SMP safety */
 };
 
 /* ================================================================
@@ -135,11 +156,9 @@ static int pipe_close(struct inode *inode, struct file *filp) {
     struct pipe_ring *ring = (struct pipe_ring *)inode->priv;
     if (!ring) return 0;
 
-    /*
-     * Determine which end is being closed based on the inode.
-     * We use a convention: the read-end inode has name "pipe:[r]",
-     * the write-end inode has name "pipe:[w]".
-     */
+    /* Spinlock for SMP safety: prevent concurrent close from both ends */
+    pipe_spin_lock(&ring->lock);
+
     if (inode->name && inode->name[0] == 'r') {
         ring->read_open = 0;
     } else {
@@ -148,8 +167,11 @@ static int pipe_close(struct inode *inode, struct file *filp) {
 
     /* If both ends closed, free the ring */
     if (!ring->read_open && !ring->write_open) {
+        pipe_spin_unlock(&ring->lock);
         kfree(ring);
         inode->priv = NULL;
+    } else {
+        pipe_spin_unlock(&ring->lock);
     }
 
     (void)filp;

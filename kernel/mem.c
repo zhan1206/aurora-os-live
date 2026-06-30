@@ -239,15 +239,35 @@ static void buddy_mark_available(uint64_t start_pfn, uint64_t end_pfn) {
 static struct page *buddy_merge(struct page *p);
 static void buddy_coalesce_all(void) {
     for (uint32_t order = 0; order < MAX_ORDER; order++) {
-        struct page *p = free_area[order];
-        if (!p) continue;
-        struct page *start = p;
+        /*
+         * buddy_merge() can recursively merge pages, which removes
+         * elements from the current order's free list and may set
+         * their ->next to NULL.  Saving a 'next' pointer before
+         * calling buddy_merge() is unsafe because the buddy may be
+         * the saved 'next' element, causing premature termination.
+         *
+         * Fix: restart from the head of free_area[order] after each
+         * merge.  This is O(n^2) but correct, and runs only once
+         * at boot time.
+         */
+        int merged;
         do {
-            struct page *next = p->next;
-            buddy_merge(p);
-            p = next;
-            /* After merge, the list may have changed; re-scan */
-        } while (p && p != start && free_area[order]);
+            merged = 0;
+            struct page *p = free_area[order];
+            while (p) {
+                if (!(p->flags & PAGE_FLAG_FREE)) {
+                    p = p->next;
+                    continue;
+                }
+                struct page *result = buddy_merge(p);
+                if (result != p) {
+                    /* merge succeeded — restart from head */
+                    merged = 1;
+                    break;
+                }
+                p = p->next;
+            }
+        } while (merged);
     }
 }
 
@@ -371,7 +391,10 @@ void phys_mem_init(void *mb_info) {
                                          ? 256ULL * 1024 * 1024 : end_addr;
                     }
 
-                    entries += e->size;
+                    /* Multiboot1 spec: entry->size is the size of the data
+                     * portion (excluding the size field itself).
+                     * Total entry size = size + sizeof(uint32_t). */
+                    entries += e->size + sizeof(uint32_t);
                 }
 
                 if (e820_total > 0) total_ram = e820_total;
@@ -636,7 +659,13 @@ void free_pages(void *ptr, uint32_t order) {
     p->ref_count = 0;
 
     list_add(&free_area[order], p);
-    stat_used_pages -= (1ULL << order);
+    /* Guard against unsigned underflow: only decrement if enough pages
+     * were previously accounted.  Double-free or freeing never-allocated
+     * pages would otherwise cause stat_used_pages to wrap to ~2^64. */
+    if (stat_used_pages >= (1ULL << order))
+        stat_used_pages -= (1ULL << order);
+    else
+        stat_used_pages = 0;
 
     /* Try to merge with buddy */
     buddy_merge(p);
@@ -735,21 +764,52 @@ void *kmalloc(size_t size) {
         /* If no free objects, release lock, grow cache, then retry.
          * This avoids lock ordering violation: slab_grow calls alloc_page
          * which acquires buddy_lock, and buddy_lock must be acquired
-         * BEFORE slab_lock per the lock ordering rules. */
+         * BEFORE slab_lock per the lock ordering rules.
+         *
+         * Use a 'growing' flag to prevent TOCTOU double-grow races:
+         * two threads seeing an empty free_list would both drop the
+         * lock and call slab_grow(), wasting a page.  The flag ensures
+         * only one thread performs the grow. */
         if (!cache->free_list) {
+            if (cache->growing) {
+                /* Another thread is already growing this cache.
+                 * Release the lock, wait briefly, and retry. */
+                slab_unlock();
+                asm volatile ("pause" ::: "memory");
+                slab_lock();
+                if (cache->free_list) goto slab_pop;
+                if (cache->growing) {
+                    /* Still growing — spin on the lock boundary */
+                    slab_unlock();
+                    for (volatile int s = 0; s < 100; s++)
+                        asm volatile ("pause" ::: "memory");
+                    slab_lock();
+                    if (!cache->free_list) {
+                        slab_unlock();
+                        return NULL;
+                    }
+                    goto slab_pop;
+                }
+            }
+            cache->growing = 1;
             slab_unlock();
             if (slab_grow(cache) != 0) {
+                slab_lock();
+                cache->growing = 0;
+                slab_unlock();
                 log_printf(LOG_LEVEL_WARN, "kmalloc: slab grow failed (size=%d)\n", (int)size);
                 return NULL;
             }
             /* Re-acquire and retry — free_list should be non-NULL now */
             slab_lock();
+            cache->growing = 0;
             if (!cache->free_list) {
                 slab_unlock();
                 return NULL;
             }
         }
 
+slab_pop:
         /* Pop from free list */
         void *obj = cache->free_list;
         cache->free_list = *(void**)obj;

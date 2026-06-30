@@ -97,8 +97,49 @@ void do_sys_sigreturn(void) {
     }
 
     if (current->sig->saved_rip) {
-        current_tf->rip = current->sig->saved_rip;
-        current_tf->rsp = current->sig->saved_rsp;
+        /*
+         * Restore the sigframe from the user stack. The sigframe was
+         * placed at user_rsp - sizeof(struct sigframe) by check_signals(),
+         * where user_rsp is the original RSP before signal delivery.
+         *
+         * Stack layout (low to high):
+         *   [new_rsp]         = return addr (8 bytes) → consumed by handler's ret
+         *   [new_rsp+8]       = trampoline (16 bytes)
+         *   [new_rsp+24]      = sigframe (sizeof(struct sigframe) bytes)
+         *   [orig user_rsp]   = original stack top
+         *
+         * new_rsp = user_rsp - (sizeof(sigframe) + 8 + TRAMPOLINE_SIZE)
+         * sigframe is at: user_rsp - sizeof(sigframe)
+         */
+        uint64_t user_rsp = current->sig->saved_rsp;
+        uint64_t frame_addr = user_rsp - sizeof(struct sigframe);
+
+        struct sigframe frame;
+        if (copy_from_user(&frame, (void *)(uintptr_t)frame_addr,
+                           sizeof(frame)) == 0 &&
+            frame.signo > 0 && frame.signo < NSIG) {
+            /* Restore all general-purpose registers from the sigframe */
+            current_tf->r15 = frame.r15;
+            current_tf->r14 = frame.r14;
+            current_tf->r13 = frame.r13;
+            current_tf->r12 = frame.r12;
+            current_tf->r11 = frame.r11;
+            current_tf->r10 = frame.r10;
+            current_tf->r9  = frame.r9;
+            current_tf->r8  = frame.r8;
+            current_tf->rsi = frame.rsi;
+            current_tf->rdi = frame.rdi;
+            current_tf->rdx = frame.rdx;
+            current_tf->rcx = frame.rcx;
+            current_tf->rax = frame.rax;
+            current_tf->rip = frame.rip;
+            current_tf->rsp = frame.rsp;
+        } else {
+            /* Fallback: restore RIP/RSP from saved context only */
+            current_tf->rip = current->sig->saved_rip;
+            current_tf->rsp = current->sig->saved_rsp;
+        }
+
         current->sig->saved_rip = 0;
         current->sig->saved_rsp = 0;
 
@@ -220,7 +261,8 @@ void check_signals(void) {
         }
         tramp[5] = 0x0F;                        /* syscall */
         tramp[6] = 0x05;
-        /* tramp[7..15] = 0 (padding) */
+        /* Zero the remaining trampoline bytes for security */
+        memset(tramp + 7, 0, TRAMPOLINE_SIZE - 7);
 
         /* Write return address pointing to trampoline code */
         *(uint64_t *)(uintptr_t)new_rsp = new_rsp + 8;

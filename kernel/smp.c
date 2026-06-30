@@ -76,8 +76,7 @@ extern void ap_entry(void);
 /* Offsets for data fields in trampoline page */
 #define TRAMP_DATA_PML4     0x03F0
 #define TRAMP_DATA_STACK    0x03F8
-#define TRAMP_DATA_CPU_ID   0x03FC
-#define TRAMP_DATA_ENTRY    0x03F0  /* same as PML4 (only one needed at a time) */
+#define TRAMP_DATA_ENTRY    0x03E8  /* ap_entry address (before PML4, no overlap) */
 
 static const uint8_t trampoline_code[] __attribute__((unused)) = {
     /* ============================================

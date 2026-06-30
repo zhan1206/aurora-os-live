@@ -305,6 +305,10 @@ static long sys_mmap(void *addr, size_t length, int prot, int flags,
     size_t num_pages = (length + PAGE_SIZE - 1) / PAGE_SIZE;
     uint64_t map_va = 0x60000000ULL; /* Fixed mapping region for now */
 
+    /* Track physical pages for cleanup on failure */
+    void *phys_pages[64];  /* reasonable upper bound for mmap */
+    if (num_pages > 64) { current->t_errno = ENOMEM; return -1; }
+
     uint64_t pte_flags = PTE_USER;
     if (prot & 2) pte_flags |= PTE_RW;      /* PROT_WRITE */
     if (!(prot & 4)) pte_flags |= PTE_NX;    /* PROT_EXEC */
@@ -316,13 +320,12 @@ static long sys_mmap(void *addr, size_t length, int prot, int flags,
             for (size_t j = 0; j < i; j++) {
                 uint64_t va = map_va + j * PAGE_SIZE;
                 unmap_page(current->cr3, va);
-                /* Note: physical page cannot be easily recovered after unmap
-                 * without tracking it. This is a known limitation of the
-                 * fixed-region approach. */
+                free_page(phys_pages[j]);
             }
             current->t_errno = ENOMEM;
             return -1;
         }
+        phys_pages[i] = phys;
         memset(phys, 0, PAGE_SIZE);
         if (map_page(current->cr3, map_va + i * PAGE_SIZE,
                      (uint64_t)(uintptr_t)phys, pte_flags) != 0) {
@@ -331,6 +334,7 @@ static long sys_mmap(void *addr, size_t length, int prot, int flags,
             for (size_t j = 0; j < i; j++) {
                 uint64_t va = map_va + j * PAGE_SIZE;
                 unmap_page(current->cr3, va);
+                free_page(phys_pages[j]);
             }
             current->t_errno = ENOMEM;
             return -1;
@@ -370,12 +374,12 @@ static long sys_mprotect(void *addr, size_t length, int prot) {
 
         uint64_t *pml4 = (uint64_t *)phys_to_virt(current->cr3);
         if (!(pml4[pml4_idx] & PTE_PRESENT)) { va_page += PAGE_SIZE; continue; }
-        uint64_t *pdpt = (uint64_t *)(uintptr_t)(pml4[pml4_idx] & PTE_ADDR_MASK);
+        uint64_t *pdpt = (uint64_t *)phys_to_virt(pml4[pml4_idx] & PTE_ADDR_MASK);
         if (!(pdpt[pdpt_idx] & PTE_PRESENT)) { va_page += PAGE_SIZE; continue; }
-        uint64_t *pd = (uint64_t *)(uintptr_t)(pdpt[pdpt_idx] & PTE_ADDR_MASK);
+        uint64_t *pd = (uint64_t *)phys_to_virt(pdpt[pdpt_idx] & PTE_ADDR_MASK);
         if (!(pd[pd_idx] & PTE_PRESENT)) { va_page += PAGE_SIZE; continue; }
         if (pd[pd_idx] & PTE_PS) { va_page += PAGE_SIZE; continue; } /* skip huge pages */
-        uint64_t *pt = (uint64_t *)(uintptr_t)(pd[pd_idx] & PTE_ADDR_MASK);
+        uint64_t *pt = (uint64_t *)phys_to_virt(pd[pd_idx] & PTE_ADDR_MASK);
         if (!(pt[pt_idx] & PTE_PRESENT)) { va_page += PAGE_SIZE; continue; }
 
         /* Update protection flags, preserving the physical address */

@@ -454,17 +454,10 @@ void schedule(void) {
     /* If prev->state was TASK_BLOCKED or TASK_ZOMBIE, leave vruntime unchanged */
 
     /* Update min_vruntime: track the minimum vruntime across all ready tasks.
-     * Use max(min_vruntime, next->vruntime) to ensure monotonic progression.
-     * A task that was blocked (low vruntime) will pull min_vruntime down,
-     * which is correct — it deserves to run quickly when it wakes up.
-     * But normally, min_vruntime increases over time as tasks consume CPU. */
-    if (next->vruntime < min_vruntime) {
-        /* A blocked task woke up with a very low vruntime — it should run */
-        min_vruntime = next->vruntime;
-    } else if (min_vruntime < next->vruntime) {
-        /* Normal case: the scheduled task has the minimum vruntime,
-         * which may be higher than the current min_vruntime.
-         * Update min_vruntime to track the actual minimum. */
+     * The scheduled task (next) has the minimum vruntime among ready tasks
+     * (we selected it that way). But don't let min_vruntime decrease — use
+     * max() to ensure monotonic progression. */
+    if (next->vruntime > min_vruntime) {
         min_vruntime = next->vruntime;
     }
 
@@ -541,6 +534,9 @@ void do_exit_current(int code) {
     }
 
     /* Remove from ready queue */
+    int cpu_id = current_cpu_id();
+    struct run_queue *rq = &per_cpu_rq[cpu_id];
+
     struct task_struct *prev_node = current;
     while (prev_node->next != current) prev_node = prev_node->next;
 
@@ -550,6 +546,14 @@ void do_exit_current(int code) {
     }
 
     prev_node->next = current->next;
+
+    /* Update rq->head if we're removing the head of the queue */
+    if (rq->head == current) {
+        rq->head = current->next;
+    }
+
+    /* Decrement run queue count */
+    if (rq->count > 0) rq->count--;
 
     /*
      * IMPORTANT: Do NOT do our own context_switch here.
@@ -742,6 +746,17 @@ void smp_schedule(int my_cpu_id) {
 
     struct run_queue *src_rq = &per_cpu_rq[busiest_cpu];
 
+    /* Lock both queues to prevent concurrent modification */
+    spin_lock(&my_rq->lock);
+    spin_lock(&src_rq->lock);
+
+    /* Re-check counts after acquiring locks */
+    if (my_rq->count > 1 || src_rq->count <= 1) {
+        spin_unlock(&src_rq->lock);
+        spin_unlock(&my_rq->lock);
+        return;
+    }
+
     /* Steal one task from the busiest CPU (not the head) */
     struct task_struct *stolen = NULL;
 
@@ -759,12 +774,15 @@ void smp_schedule(int my_cpu_id) {
         } while (candidate != start);
     }
 
-    if (!stolen) return;
+    if (stolen) {
+        /* Remove from source CPU and add to our CPU */
+        smp_dequeue_task(stolen, busiest_cpu);
+        smp_enqueue_task(stolen, my_cpu_id);
 
-    /* Remove from source CPU and add to our CPU */
-    smp_dequeue_task(stolen, busiest_cpu);
-    smp_enqueue_task(stolen, my_cpu_id);
+        log_printf(LOG_LEVEL_DEBUG, "smp: migrated task pid=%d from CPU %d to CPU %d\n",
+                   stolen->pid, busiest_cpu, my_cpu_id);
+    }
 
-    log_printf(LOG_LEVEL_DEBUG, "smp: migrated task pid=%d from CPU %d to CPU %d\n",
-               stolen->pid, busiest_cpu, my_cpu_id);
+    spin_unlock(&src_rq->lock);
+    spin_unlock(&my_rq->lock);
 }

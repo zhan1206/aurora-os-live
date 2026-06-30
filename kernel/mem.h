@@ -49,6 +49,7 @@ struct slab_cache {
     struct page *partial;     /* partially free pages */
     struct page *full;        /* fully allocated pages */
     void *free_list;          /* free object list (intrusive) */
+    volatile int growing;     /* prevent concurrent slab_grow() */
 };
 
 /* ============ API: Physical Memory ============ */
