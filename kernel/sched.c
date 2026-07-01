@@ -385,7 +385,16 @@ void schedule(void) {
     int cpu_id = current_cpu_id();
     struct run_queue *rq = &per_cpu_rq[cpu_id];
 
+    /*
+     * Acquire the run queue lock to protect against concurrent
+     * modifications from work stealing (smp_schedule) or other
+     * CPUs accessing this queue. The lock is released before
+     * context_switch to avoid holding it across stack switches.
+     */
+    spin_lock(&rq->lock);
+
     if (rq->head == NULL) {
+        spin_unlock(&rq->lock);
         /* No tasks in this CPU's run queue — halt or try to steal */
         log_printf(LOG_LEVEL_ERR, "schedule: CPU %d has no tasks, halting\n", cpu_id);
         for (;;) asm volatile ("cli; hlt");
@@ -421,8 +430,10 @@ void schedule(void) {
         } else if (current->state == TASK_RUNNING) {
             /* Only one runnable task — keep it running */
             current->state = TASK_RUNNING;
+            spin_unlock(&rq->lock);
             return;
         } else {
+            spin_unlock(&rq->lock);
             log_printf(LOG_LEVEL_ERR, "schedule: CPU %d no runnable tasks, halting\n", cpu_id);
             for (;;) asm volatile ("cli; hlt");
         }
@@ -430,6 +441,7 @@ void schedule(void) {
 
     if (next == current) {
         current->state = TASK_RUNNING;
+        spin_unlock(&rq->lock);
         return;
     }
 
@@ -468,6 +480,13 @@ void schedule(void) {
     if (cpu_id >= 0 && cpu_id < MAX_CPUS) {
         cpu_data[cpu_id].current_task = current;
     }
+
+    /*
+     * Release the run queue lock before context switch.
+     * The lock must not be held across context_switch because
+     * the new task won't know to release it, causing a deadlock.
+     */
+    spin_unlock(&rq->lock);
 
     uint64_t new_cr3 = current->cr3;
     asm volatile ("mov %0, %%cr3" :: "r"(new_cr3) : "memory");

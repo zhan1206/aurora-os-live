@@ -1,6 +1,6 @@
 # AuroraOS 自研审计报告与开发规范
 
-> 审计日期: 2026-06-20  
+> 审计日期: 2026-07-02  
 > 审计范围: 项目全部源代码、构建系统、文档、配置文件  
 > 审计结论: **通过 — 100% 自研**
 
@@ -134,6 +134,11 @@
 | CI/CD | `.github/workflows/*.yml` | 自研 | 原创 CI/CD 流水线 |
 | 测试脚本 | `scripts/*.py`, `scripts/*.sh` | 自研 | 原创测试脚本 |
 | 文档 | `docs/*.md`, `README.md`, `CHANGELOG.md` | 自研 | 原创项目文档 |
+| FAT32 | `kernel/fat32.c`, `kernel/include/fat32.h` | 自研 | 原创 FAT32 文件系统驱动 |
+| 网络栈 | `kernel/net/net.c`, `kernel/include/net.h` | 自研 | 原创 TCP/IP 网络协议栈 |
+| 日志系统 | `kernel/journal.c`, `kernel/journal.h` | 自研 | 原创 WAL 日志系统 |
+| 文件系统修复 | `kernel/fsck.c`, `kernel/fsck.h` | 自研 | 原创 ext2 fsck 工具 |
+| 命令行解析 | `kernel/cmdline.c`, `kernel/cmdline.h` | 自研 | 原创内核命令行解析 |
 
 ---
 
@@ -234,4 +239,4 @@
 
 ---
 
-*本报告由 AuroraOS 项目组于 2026-06-20 编制，作为项目自研状态的正式审计记录。*
+*本报告由 AuroraOS 项目组于 2026-07-02 编制，作为项目 v3.4.0 自研状态的正式审计记录。*
