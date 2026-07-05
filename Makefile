@@ -160,7 +160,7 @@ help:
 
 # Show version information
 version:
-	@echo "AuroraOS v3.4.0"
+	@echo "AuroraOS v3.6.0"
 	@echo "  Build date: $(BUILD_DATE)"
 	@echo "  Git hash:   $(GIT_HASH)"
 	@echo "  Build type: $(BUILD_TYPE)"

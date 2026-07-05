@@ -2,9 +2,9 @@
 
 [![CI Build](https://github.com/zhan1206/aurora-os/actions/workflows/build.yml/badge.svg)](https://github.com/zhan1206/aurora-os/actions/workflows/build.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Lines of Code](https://img.shields.io/badge/code-~8,500%20lines-blue)](kernel/)
-[![Self Tests](https://img.shields.io/badge/tests-20/20-brightgreen)](kernel/selftest.c)
-[![Version](https://img.shields.io/badge/version-v3.4.0-blue)](CHANGELOG.md)
+[![Lines of Code](https://img.shields.io/badge/code-~26,500%20lines-blue)](kernel/)
+[![Self Tests](https://img.shields.io/badge/tests-14/14-brightgreen)](kernel/selftest.c)
+[![Version](https://img.shields.io/badge/version-v3.6.0-blue)](CHANGELOG.md)
 
 **100% 自研代码** | 无 Linux 内核代码 | 无第三方内核组件
 
@@ -244,7 +244,7 @@ AuroraOS
 │   ├── vfs.c/h       # VFS 层 + dentry 缓存
 │   ├── console.c/h   # VGA 文本模式 + ANSI + 行编辑
 │   ├── keyboard.c    # PS/2 键盘驱动 + E0 键处理
-│   ├── selftest.c    # 内核自测试（15 项）
+│   ├── selftest.c    # 内核自测试（14 项）
 │   └── include/      # 公共头文件
 ├── arch/x86_64/      # 架构相关汇编（10 个文件）
 ├── userspace/        # 用户态程序
@@ -336,7 +336,7 @@ AuroraOS
 ### 安全机制
 - **ASLR**: 地址空间布局随机化
 - **Stack Protector**: 栈溢出保护（canary 检查）
-- **SMAP/SMEP**: 内核访问/执行用户空间内存保护
+- **SMAP/SMEP**: 内核访问/执行用户空间内存保护（计划中，需页表审计）
 - **seccomp**: 系统调用过滤
 - **Capability**: 权能安全机制
 - **内核模块签名**: 模块签名验证（受 CoolPotOS 启发）
@@ -482,7 +482,7 @@ AuroraOS/
 
 ### 内核自测试
 
-项目内置 16 项自测试，在启动时自动运行：
+项目内置 14 项自测试，在启动时自动运行：
 
 ```
 ======== Kernel Self-Test ========

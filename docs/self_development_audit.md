@@ -36,7 +36,7 @@
 |------|---------|------|
 | procfs (`kernel/procfs.c`) | 6 | 设计灵感（`/proc/interrupts`、`/proc/kmsg` 等条目设计） |
 | devtmpfs (`kernel/devtmpfs.c`, `kernel/devtmpfs.h`) | 3 | 设计灵感（设备文件系统概念） |
-| pagetable (`kernel/pagetable.c`) | 2 | 安全加固（SMAP/SMEP 启用方式） |
+| pagetable (`kernel/pagetable.c`) | 2 | 安全加固（SMAP/SMEP 代码已注释，需页表审计后启用） |
 | module_sign (`kernel/module_sign.c`) | 3 | 设计灵感（模块签名验证机制） |
 | perf (`kernel/perf.h`, `kernel/perf.c`) | 3 | 设计灵感（IRQ 跟踪、性能监控） |
 | fs (`kernel/fs.c`) | 2 | 设计灵感（devtmpfs 挂载流程） |

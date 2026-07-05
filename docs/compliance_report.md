@@ -142,7 +142,7 @@
 | 9 | TCP/IP 协议栈 | `kernel/net/net.c` | 原创实现 |
 | 10 | 管道实现 | `kernel/pipe.c` | 原创实现 |
 | 11 | 模块加载器 | `kernel/module.c` | 原创实现 |
-| 12 | ELF 加载器 | `kernel/elf.c` | 原创实现 |
+| 12 | ELF 加载器 | `kernel/elfloader.c` | 原创实现 |
 | 13 | 页表管理 | `kernel/pagetable.c` | 原创实现 |
 | 14 | 信号处理 | `kernel/signal.c` | 原创实现 |
 | 15 | PCI 设备枚举 | `kernel/pci.c` | 原创实现 |
@@ -151,12 +151,12 @@
 | 18 | RTC 时钟驱动 | `kernel/rtc.c` | 原创实现 |
 | 19 | PIT 定时器 | `kernel/pit.c` | 原创实现 |
 | 20 | VirtIO 驱动 | `kernel/virtio.c` | 原创实现 |
-| 21 | ASLR 实现 | `kernel/elf.c` | 原创实现 |
+| 21 | ASLR 实现 | `kernel/elfloader.c` | 原创实现 |
 | 22 | seccomp 过滤器 | `kernel/syscall.c` | 原创实现 |
 | 23 | 能力系统 | `kernel/capability.c` | 原创实现 |
 | 24 | SMP 多核支持 | `kernel/smp.c` | 原创实现 |
 | 25 | 系统调用入口 | `kernel/arch/x86_64/syscall_entry.S` | 原创实现 |
-| 26 | 中断处理 | `kernel/arch/x86_64/idt.c` | 原创实现 |
+| 26 | 中断处理 | `kernel/arch/x86_64/idt.S` | 原创实现 |
 | 27 | GDT/TSS 设置 | `kernel/arch/x86_64/gdt.S` | 原创实现 |
 
 **验证结果**: 27 项核心功能/算法全部为自主研发，无任何第三方代码复制。

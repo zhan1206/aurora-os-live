@@ -1,10 +1,10 @@
-﻿# AuroraOS 系统架构设计文档
+﻿﻿# AuroraOS 系统架构设计文档
 
 ## 1. 概述
 
 AuroraOS 是一个基于 x86_64 架构的自主研发操作系统内核，采用混合内核（Hybrid Kernel）设计，支持多任务调度、虚拟内存管理、虚拟文件系统、POSIX 信号机制、ELF 可执行文件加载、SMP 多核、动态模块加载和硬件性能监控。
 
-- **版本**: 3.4.0
+- **版本**: 3.6.0
 - **目标架构**: x86_64 (AMD64)
 - **内核类型**: 混合内核（宏内核 + 可加载模块）
 - **启动方式**: Multiboot1 (GRUB2) / UEFI
@@ -183,7 +183,7 @@ AuroraOS 是一个基于 x86_64 架构的自主研发操作系统内核，采用
 | 栈保护 | `stack_protect.c` | 栈金丝雀保护（`-fstack-protector-strong`） |
 | ASLR | `aslr.c` | 地址空间布局随机化（xorshift64 PRNG，栈/mmap 随机化） |
 | Seccomp | `seccomp.c` | 系统调用访问控制（256 位位图过滤器） |
-| SMAP/SMEP | `pagetable.c` | 内核访问保护（CR4 位 20/21），防止内核访问用户空间内存（CoolPotOS 启发） |
+| SMAP/SMEP | `pagetable.c` | 内核访问保护（CR4 位 20/21），计划中（代码已注释，需页表审计后启用） |
 | 模块签名 | `module_sign.c` | 内核模块完整性验证（HMAC 风格签名） |
 
 ### 3.11 ELF 加载
