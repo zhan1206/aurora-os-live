@@ -1,5 +1,27 @@
 # AuroraOS Changelog
 
+## v3.7.0 (2026-07-05) — Audit Report Compliance & Path Correction
+
+### 文档路径修正（合规性报告）
+- **compliance_report.md 路径修正**: 修正 3 个不存在的文件路径引用
+  - `kernel/arch/x86_64/syscall_entry.S` → `kernel/syscall_entry.c`（C 文件，非汇编）
+  - `kernel/arch/x86_64/idt.S` → `arch/x86_64/idt.S`
+  - `kernel/arch/x86_64/gdt.S` → `arch/x86_64/gdt.S`
+- **compliance_report.md 目录路径修正**: `kernel/arch/x86_64/` (15 files) → `arch/x86_64/` (10 files)
+  - 确认 `kernel/arch/x86_64/` 目录不存在，实际架构汇编文件位于 `arch/x86_64/`
+- **compliance_report.md 版本号更新**: v3.4.0 → v3.6.0，审计日期更新至 2026-07-05
+
+### 文档数值一致性修正（架构文档）
+- **architecture.md 自检项数**: 16 项 → 14 项（与 selftest.c 实际测试函数数一致）
+- **architecture.md 系统调用数**: 22 个 → 45 个（与 syscall.h 实际系统调用号数一致）
+- **self_development_audit.md 版本号**: 更新至 v3.6.0
+
+### 版本控制
+- 版本号从 v3.6.0 升级至 v3.7.0
+- 更新 README.md 版本徽章
+
+---
+
 ## v3.6.0 (2026-07-02) — Documentation Accuracy & Integrity Fix
 
 ### 文档准确性修复
@@ -8,7 +30,7 @@
   - 受影响文件: README.md、docs/architecture.md、docs/tech_research.md、docs/self_development_audit.md、CHANGELOG.md
 - **compliance_report.md 路径修正**: 修正 3 个不存在的文件路径引用
   - `kernel/elf.c` → `kernel/elfloader.c`
-  - `kernel/arch/x86_64/idt.c` → `kernel/arch/x86_64/idt.S`
+  - `kernel/arch/x86_64/idt.c` → `arch/x86_64/idt.S`（v3.7.0 进一步修正：确认 `kernel/arch/x86_64/` 目录不存在）
 - **test_report.md 重写**: 区分"自动化测试"（selftest.c 14 项）和"手动验证"（30 项），不再将手动验证项标注为"PASS"
   - 明确标注无自动化压力测试/网络测试框架
 - **README.md 数值修正**:

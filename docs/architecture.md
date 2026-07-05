@@ -4,7 +4,7 @@
 
 AuroraOS 是一个基于 x86_64 架构的自主研发操作系统内核，采用混合内核（Hybrid Kernel）设计，支持多任务调度、虚拟内存管理、虚拟文件系统、POSIX 信号机制、ELF 可执行文件加载、SMP 多核、动态模块加载和硬件性能监控。
 
-- **版本**: 3.6.0
+- **版本**: 3.7.0
 - **目标架构**: x86_64 (AMD64)
 - **内核类型**: 混合内核（宏内核 + 可加载模块）
 - **启动方式**: Multiboot1 (GRUB2) / UEFI
@@ -94,7 +94,7 @@ AuroraOS 是一个基于 x86_64 架构的自主研发操作系统内核，采用
 | 主初始化 | `main.c` | 内核启动流程，各子系统初始化 |
 | 日志 | `log.c` | 分级日志输出（DEBUG/INFO/WARN/ERR） |
 | 断言 | `include/assert.h` | 运行时断言宏 |
-| 自检 | `selftest.c` | 内核自检框架（16 项） |
+| 自检 | `selftest.c` | 内核自检框架（14 项） |
 
 ### 3.2 内存管理
 
@@ -153,7 +153,7 @@ AuroraOS 是一个基于 x86_64 架构的自主研发操作系统内核，采用
 
 | 模块 | 文件 | 职责 |
 |------|------|------|
-| 系统调用分发 | `syscall.c` | 系统调用实现与分发（22 个系统调用） |
+| 系统调用分发 | `syscall.c` | 系统调用实现与分发（45 个系统调用） |
 | 系统调用入口 | `syscall_entry.c` | MSR 寄存器配置 |
 | 系统调用号 | `syscall.h` | 系统调用号枚举 |
 | 汇编入口 | `arch/x86_64/syscall.S` | syscall 指令入口 |
@@ -300,7 +300,7 @@ ASLR 随机化:
    p. sysctl_init()          - 初始化系统控制接口 (12 项统计)
    q. ramdisk_init() + fs_init() - 创建 RAM 磁盘，挂载 ext2/ramfs
    r. module_init()          - 初始化模块加载器 (内核符号表)
-   s. kernel_selftest()      - 运行 16 项内核自检
+   s. kernel_selftest()      - 运行 14 项内核自检
    t. shell_main()           - 启动 Shell
 ```
 
