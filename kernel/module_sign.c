@@ -1,20 +1,28 @@
 /*
- * module_sign.c - Kernel module signature verification
+ * module_sign.c - Kernel module signature verification (DEMONSTRATION)
  *
  * Inspired by CoolPotOS's ECC module key verification mechanism
- * (CP_Kernel-x86_64-v0.4.39+). Provides simple SHA-256-based
- * signature verification for kernel modules.
+ * (CP_Kernel-x86_64-v0.4.39+).
  *
- * The module signing process:
+ * IMPORTANT: This is a DEMONSTRATION / PLACEHOLDER implementation.
+ *   - Uses a simple XOR-based rolling hash, NOT SHA-256
+ *   - Uses a hardcoded ASCII placeholder key, NOT a real cryptographic key
+ *   - The MODULE_SIGN_CHECK macro is not defined in any build configuration
+ *   - module_sign_verify() is not called from module_load()
+ *   - In its current state, this code provides ZERO security benefit
+ *
+ * For production use, this would need:
+ *   1. A real cryptographic hash (SHA-256 or SHA-512)
+ *   2. A proper key pair (RSA or ECDSA) with secure key management
+ *   3. Integration into the module_load() path
+ *   4. A build system step to sign modules
+ *
+ * The module signing process (as designed):
  *   1. Build system computes SHA-256 of the module binary
  *   2. The hash is signed with a private key (RSA or ECDSA)
  *   3. The signature is appended to the module binary
  *   4. During module_load(), the kernel verifies the signature
  *      using the embedded public key.
- *
- * For simplicity, this implementation uses a compile-time
- * embedded public key and a simple HMAC-like verification.
- * In production, use ECDSA with proper key management.
  */
 
 #include "module.h"

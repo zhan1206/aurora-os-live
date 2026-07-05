@@ -375,12 +375,18 @@ struct irq_counter {
 
 ## 12. 内核模块签名模块 (module_sign.c)
 
-**职责**: 内核模块签名验证，确保加载模块的完整性（受 CoolPotOS ECC 模块密钥验证机制启发）。
+**职责**: 内核模块签名验证演示（受 CoolPotOS ECC 模块密钥验证机制启发）。
+
+**重要说明**: 当前为演示/占位实现，尚未启用：
+- 使用 XOR 滚动哈希（非 SHA-256），硬编码占位密钥
+- `MODULE_SIGN_CHECK` 宏未在任何构建配置中定义
+- `module_sign_verify()` 未接入 `module_load()` 流程
+- 当前状态下不提供任何实际安全保护
 
 **核心功能**:
-- `module_sign_verify()`: 验证模块签名头
-- `module_sign_is_enabled()`: 检查签名验证是否启用
-- 编译时可选：`MODULE_SIGN_CHECK` 宏控制
+- `module_sign_verify()`: 验证模块签名头（演示用）
+- `module_sign_is_enabled()`: 检查签名验证是否启用（当前恒返回 0）
+- 编译时可选：`MODULE_SIGN_CHECK` 宏控制（未启用）
 
 **签名格式**:
 ```

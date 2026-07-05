@@ -1,5 +1,36 @@
 # AuroraOS Changelog
 
+## v3.8.0 (2026-07-05) — Audit Report Round 2: Accuracy & Honesty
+
+### 合规性报告路径修正
+- **compliance_report.md**: 移除 4 个不存在的目录 (`kernel/link/`, `kernel/crt/`, `kernel/mod/`, `kernel/fs/`)
+  - 实际文件结构: linker.ld 在根目录, module.c 为单文件, ext2/fat32/journal/fsck 均在 kernel/ 下
+- **compliance_report.md**: 修正 `kernel/virtio.c` → `kernel/virtio_blk.c` / `kernel/virtio_net.c`
+- 更新文件数统计: kernel/ 80+, kernel/include/ 17, kernel/net/ 1
+
+### 自测试数量修正
+- **selftest.c 实际为 13 个测试函数**（kernel_selftest() 调用 13 个 test_* 函数）
+- 移除 test_report.md 中不存在的 SELF-14 test_roundtrip
+- 统一 README/architecture/test_report 所有文档的自检数为 13
+
+### 模块签名诚实声明
+- **module_sign.c**: 添加 DEMONSTRATION 声明，明确标注当前状态
+  - 使用 XOR 滚动哈希（非 SHA-256），硬编码 ASCII 占位密钥
+  - `MODULE_SIGN_CHECK` 宏未定义，`module_sign_verify()` 未接入 `module_load()`
+  - 当前不提供任何实际安全保护
+- **README.md**: 更新模块签名描述为"演示性占位实现（未启用）"
+- **architecture.md**: 更新模块签名描述
+- **modules.md**: 添加重要说明，标注当前为演示/占位实现
+
+### 技术研究报告修正
+- **tech_research.md**: 内存分配性能数据标注为"基于操作复杂度估算，非实测"
+  - 明确标注无 RDTSC 计时基准测试代码
+
+### 版本控制
+- 版本号从 v3.7.0 升级至 v3.8.0
+
+---
+
 ## v3.7.0 (2026-07-05) — Audit Report Compliance & Path Correction
 
 ### 文档路径修正（合规性报告）

@@ -1,7 +1,7 @@
 # AuroraOS 功能测试报告
 
 > 测试日期: 2026-07-05  
-> 测试版本: v3.7.0  
+> 测试版本: v3.8.0  
 > 测试范围: 全模块功能回归测试  
 > **重要说明**: 本报告区分"自动化测试"（selftest.c）和"手动验证"（通过 Shell/CI 确认），标注模式见各表。
 
@@ -13,13 +13,13 @@
 
 | 测试层次 | 覆盖范围 | 用例数 | 自动化 | 说明 |
 |----------|----------|--------|--------|------|
-| 内核自测试 | 内存/调度/文件系统/管道/VFS/日志/fsck | 14 | 自动化 | selftest.c 启动时自动执行 |
+| 内核自测试 | 内存/调度/文件系统/管道/VFS/日志/fsck | 13 | 自动化 | selftest.c 启动时自动执行 |
 | 手动验证 | 系统调用/Shell/网络/设备 | 30 | 手动 | 通过 Shell 交互和 CI QEMU 启动验证 |
 | 代码审查 | 边界条件/安全/竞态 | 12 | 代码审查 | 逐文件静态分析 |
 
 ### 1.2 自测试框架
 
-内核内置 `selftest.c` 自测试框架，包含 **14 个测试函数**（107 个断言），在启动时自动执行：
+内核内置 `selftest.c` 自测试框架，包含 **13 个测试函数**（在启动时自动执行：
 
 ```
 buddy allocator → slab allocator → page table → scheduler → VFS → pipe → string → rtc → inode → dentry → signal → journal → fsck
@@ -44,7 +44,6 @@ buddy allocator → slab allocator → page table → scheduler → VFS → pipe
 | SELF-11 | test_signal_edge | 信号边界条件 | 1 | PASS |
 | SELF-12 | test_journal | 日志初始化、事务提交、恢复 | 1 | PASS |
 | SELF-13 | test_fsck | 文件系统一致性检查 | 1 | PASS |
-| SELF-14 | test_roundtrip | 综合往返测试 | 1 | PASS |
 
 ---
 
@@ -142,10 +141,10 @@ buddy allocator → slab allocator → page table → scheduler → VFS → pipe
 
 **测试结论: 通过**
 
-- 14 项自动化自测试（selftest.c）全部通过
+- 13 项自动化自测试（selftest.c）全部通过
 - 30 项手动验证通过 Shell 和 CI QEMU 确认
 - 12 项代码审查验证通过
 - 5 个已知限制（已记录，非阻塞）
 - 0 个已知高危缺陷
 
-项目整体功能完整，质量稳定，达到 v3.7.0 发布标准。
+项目整体功能完整，质量稳定，达到 v3.8.0 发布标准。

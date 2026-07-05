@@ -38,14 +38,10 @@
 
 | 目录 | 文件数 | 审计结果 | 备注 |
 |------|--------|----------|------|
-| `kernel/` | 30 | 100% 自研 | 核心内核模块 |
+| `kernel/` | 80+ | 100% 自研 | 核心内核模块（C/汇编/头文件） |
 | `arch/x86_64/` | 10 | 100% 自研 | 汇编启动代码 |
-| `kernel/include/` | 25 | 100% 自研 | 头文件 |
-| `kernel/net/` | 3 | 100% 自研 | 网络协议栈 |
-| `kernel/link/` | 2 | 100% 自研 | 链接脚本 |
-| `kernel/crt/` | 2 | 100% 自研 | C 运行时 |
-| `kernel/mod/` | 2 | 100% 自研 | 示例模块 |
-| `kernel/fs/` | 6 | 100% 自研 | 文件系统 |
+| `kernel/include/` | 17 | 100% 自研 | 公共头文件 |
+| `kernel/net/` | 1 | 100% 自研 | 网络协议栈 |
 
 ### 2.2 用户态程序 (20 个文件)
 
@@ -150,7 +146,7 @@
 | 17 | VGA 控制台 | `kernel/console.c` | 原创实现 |
 | 18 | RTC 时钟驱动 | `kernel/rtc.c` | 原创实现 |
 | 19 | PIT 定时器 | `kernel/pit.c` | 原创实现 |
-| 20 | VirtIO 驱动 | `kernel/virtio.c` | 原创实现 |
+| 20 | VirtIO 驱动 | `kernel/virtio_blk.c` / `kernel/virtio_net.c` | 原创实现 |
 | 21 | ASLR 实现 | `kernel/elfloader.c` | 原创实现 |
 | 22 | seccomp 过滤器 | `kernel/syscall.c` | 原创实现 |
 | 23 | 能力系统 | `kernel/capability.c` | 原创实现 |

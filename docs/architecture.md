@@ -4,7 +4,7 @@
 
 AuroraOS 是一个基于 x86_64 架构的自主研发操作系统内核，采用混合内核（Hybrid Kernel）设计，支持多任务调度、虚拟内存管理、虚拟文件系统、POSIX 信号机制、ELF 可执行文件加载、SMP 多核、动态模块加载和硬件性能监控。
 
-- **版本**: 3.7.0
+- **版本**: 3.8.0
 - **目标架构**: x86_64 (AMD64)
 - **内核类型**: 混合内核（宏内核 + 可加载模块）
 - **启动方式**: Multiboot1 (GRUB2) / UEFI
@@ -94,7 +94,7 @@ AuroraOS 是一个基于 x86_64 架构的自主研发操作系统内核，采用
 | 主初始化 | `main.c` | 内核启动流程，各子系统初始化 |
 | 日志 | `log.c` | 分级日志输出（DEBUG/INFO/WARN/ERR） |
 | 断言 | `include/assert.h` | 运行时断言宏 |
-| 自检 | `selftest.c` | 内核自检框架（14 项） |
+| 自检 | `selftest.c` | 内核自检框架（13 项） |
 
 ### 3.2 内存管理
 
@@ -184,7 +184,7 @@ AuroraOS 是一个基于 x86_64 架构的自主研发操作系统内核，采用
 | ASLR | `aslr.c` | 地址空间布局随机化（xorshift64 PRNG，栈/mmap 随机化） |
 | Seccomp | `seccomp.c` | 系统调用访问控制（256 位位图过滤器） |
 | SMAP/SMEP | `pagetable.c` | 内核访问保护（CR4 位 20/21），计划中（代码已注释，需页表审计后启用） |
-| 模块签名 | `module_sign.c` | 内核模块完整性验证（HMAC 风格签名） |
+| 模块签名 | `module_sign.c` | 内核模块完整性验证演示（占位实现，XOR 哈希 + 硬编码密钥，尚未启用） |
 
 ### 3.11 ELF 加载
 
@@ -300,7 +300,7 @@ ASLR 随机化:
    p. sysctl_init()          - 初始化系统控制接口 (12 项统计)
    q. ramdisk_init() + fs_init() - 创建 RAM 磁盘，挂载 ext2/ramfs
    r. module_init()          - 初始化模块加载器 (内核符号表)
-   s. kernel_selftest()      - 运行 14 项内核自检
+   s. kernel_selftest()      - 运行 13 项内核自检
    t. shell_main()           - 启动 Shell
 ```
 
@@ -377,7 +377,7 @@ ASLR 随机化:
 | 调度器 | VRFair (CFS/EEVDF 启发) | EEVDF | 均采用公平调度策略 |
 | 构建系统 | Makefile + CMake | CMake | 均支持 CMake 构建 |
 | 代码质量 | clang-format + clang-tidy | clang-format + clang-tidy | 均采用静态分析工具 |
-| 模块签名 | HMAC 风格 | ECC 密钥验证 | 不同签名方案 |
+| 模块签名 | 演示性占位实现（未启用） | ECC 密钥验证 | 不同签名方案 |
 | procfs | 10 项 | 丰富 | 均受 Linux procfs 启发 |
 | 文件系统 | VFS + RamFS + EXT2 | VFS + procfs + pipefs + devtmpfs + squashfs | CoolPotOS 文件系统类型更丰富 |
 | 终端 | VGA + 帧缓冲 | flanterm 终端渲染 | 不同终端实现方案 |

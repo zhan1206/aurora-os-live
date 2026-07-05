@@ -3,8 +3,8 @@
 [![CI Build](https://github.com/zhan1206/aurora-os/actions/workflows/build.yml/badge.svg)](https://github.com/zhan1206/aurora-os/actions/workflows/build.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Lines of Code](https://img.shields.io/badge/code-~26,500%20lines-blue)](kernel/)
-[![Self Tests](https://img.shields.io/badge/tests-14/14-brightgreen)](kernel/selftest.c)
-[![Version](https://img.shields.io/badge/version-v3.7.0-blue)](CHANGELOG.md)
+[![Self Tests](https://img.shields.io/badge/tests-13/13-brightgreen)](kernel/selftest.c)
+[![Version](https://img.shields.io/badge/version-v3.8.0-blue)](CHANGELOG.md)
 
 **100% 自研代码** | 无 Linux 内核代码 | 无第三方内核组件
 
@@ -244,7 +244,7 @@ AuroraOS
 │   ├── vfs.c/h       # VFS 层 + dentry 缓存
 │   ├── console.c/h   # VGA 文本模式 + ANSI + 行编辑
 │   ├── keyboard.c    # PS/2 键盘驱动 + E0 键处理
-│   ├── selftest.c    # 内核自测试（14 项）
+│   ├── selftest.c    # 内核自测试（13 项）
 │   └── include/      # 公共头文件
 ├── arch/x86_64/      # 架构相关汇编（10 个文件）
 ├── userspace/        # 用户态程序
@@ -339,7 +339,7 @@ AuroraOS
 - **SMAP/SMEP**: 内核访问/执行用户空间内存保护（计划中，需页表审计）
 - **seccomp**: 系统调用过滤
 - **Capability**: 权能安全机制
-- **内核模块签名**: 模块签名验证（受 CoolPotOS 启发）
+- **内核模块签名**: 模块签名验证演示（占位实现，尚未启用）
 - **整数溢出保护**: 关键内存分配路径溢出检查
 - **NULL 指针保护**: 系统调用关键路径 NULL 检查
 
@@ -353,7 +353,7 @@ AuroraOS
 - **ELF 可重定位模块加载**: 支持 .ko 文件动态加载
 - **符号解析**: 内核符号表 + 模块间符号引用
 - **x86_64 重定位**: R_X86_64_64/PC32/32/32S/RELATIVE
-- **模块签名**: HMAC 风格签名验证（可选）
+- **模块签名**: 演示性占位实现（未启用，XOR 哈希 + 硬编码密钥）
 
 ### 终端与 Shell
 - **VGA 文本模式**: 80×25 彩色字符
@@ -482,7 +482,7 @@ AuroraOS/
 
 ### 内核自测试
 
-项目内置 14 项自测试，在启动时自动运行：
+项目内置 13 项自测试，在启动时自动运行：
 
 ```
 ======== Kernel Self-Test ========
