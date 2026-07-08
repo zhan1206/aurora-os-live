@@ -96,6 +96,6 @@ void pit_irq_c_handler(void *rsp) {
     int count = __sync_fetch_and_add(&smp_balance_counter, 1);
     if (count + 1 >= SMP_BALANCE_INTERVAL) {
         __sync_lock_test_and_set(&smp_balance_counter, 0);
-        smp_schedule(0);
+        smp_schedule(current_cpu_id());
     }
 }

@@ -16,10 +16,10 @@
  *     allocates a new page, copies content, updates PTE to RW.
  *     (This replaces the old pf_handler_c which just panicked.)
  *
- *   - SMAP/SMEP: Enables Supervisor Mode Access Prevention (SMAP)
- *     and Supervisor Mode Execution Prevention (SMEP) via CR4 bits.
- *     These are temporarily disabled during copy_to_user/copy_from_user
- *     via STAC/CLAC instructions (CoolPotOS-inspired security hardening).
+ *   - SMAP/SMEP: NOT YET ENABLED. The code to enable Supervisor Mode Access
+ *     Prevention (SMAP) and Supervisor Mode Execution Prevention (SMEP) via
+ *     CR4 bits is deferred — needs a full page table audit to ensure all
+ *     user/kernel page attributes are correct before enabling.
  */
 
 #include "pagetable.h"
@@ -49,7 +49,7 @@ static uint64_t kernel_cr3 = 0;
  * CR3 / TLB
  * ================================================================ */
 
-static inline uint64_t read_cr3(void) {
+inline uint64_t read_cr3(void) {
     uint64_t v;
     asm volatile ("mov %%cr3, %0" : "=r"(v));
     return v;
@@ -561,7 +561,39 @@ uint64_t clone_kernel_pml4(void) {
     return (uint64_t)(uintptr_t)newp;
 }
 
-/* ================================================================
+/* ================================================================/*
+ * user_page_present: Check if a user virtual address is mapped and
+ * accessible in the current page table. Walks the 4-level page table
+ * to verify the user PTE is present.
+ * Returns 1 if mapped, 0 if not mapped or not in user space.
+ */
+int user_page_present(uint64_t vaddr) {
+    /* Only user-space addresses */
+    if (vaddr > 0x00007FFFFFFFFFFFULL) return 0;
+
+    uint64_t pml4_idx = (vaddr >> 39) & 0x1FF;
+    uint64_t pdpt_idx = (vaddr >> 30) & 0x1FF;
+    uint64_t pd_idx   = (vaddr >> 21) & 0x1FF;
+    uint64_t pt_idx   = (vaddr >> 12) & 0x1FF;
+
+    uint64_t cr3 = read_cr3();
+    uint64_t *pml4 = phys_to_virt(cr3);
+    if (!(pml4[pml4_idx] & PTE_PRESENT)) return 0;
+
+    uint64_t *pdpt = phys_to_virt(pml4[pml4_idx] & PTE_ADDR_MASK);
+    if (!(pdpt[pdpt_idx] & PTE_PRESENT)) return 0;
+
+    uint64_t *pd = phys_to_virt(pdpt[pdpt_idx] & PTE_ADDR_MASK);
+    if (!(pd[pd_idx] & PTE_PRESENT)) return 0;
+
+    /* 2MB huge page: the whole 2MB region is mapped */
+    if (pd[pd_idx] & PTE_PS) return 1;
+
+    uint64_t *pt = phys_to_virt(pd[pd_idx] & PTE_ADDR_MASK);
+    return (pt[pt_idx] & PTE_PRESENT) ? 1 : 0;
+}
+
+/*
  * pf_handler_c: Page fault handler with COW + lazy allocation
  *
  * Handles:

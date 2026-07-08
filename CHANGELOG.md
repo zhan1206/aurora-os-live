@@ -1,5 +1,40 @@
 # AuroraOS Changelog
 
+## v3.9.0 (2026-07-05) — 9 Critical Bug Fixes
+
+### 🔴 严重 (Critical)
+- **F1**: 缺页异常处理改进 — `copy_from_user`/`copy_to_user` 现在逐页检查 PT 映射，未映射地址返回 -EFAULT 而非触发内核 panic
+  - 在 pagetable.c 添加 `user_page_present()` 函数，遍历 4 级页表验证映射
+  - 在 userspace.h 添加 `user_pages_mapped()` 验证所有页
+- **F2**: TCP 连接查找修复 — `tcp_handle_packet` 正确传入 `dst_ip` 而非 `src_ip`
+  - 修复前：跨主机 TCP 收包（非 loopback）因 `tcp_find_by_addr` 匹配 `local_ip` 失败而静默丢弃
+  - `tcp_handle_packet()` 签名增加 `dst_ip` 参数，`ip_handle_packet()` 传入 `ip->dst_ip`
+
+### 🟠 高 (High)
+- **F3**: EXT2 挂载零值校验 — 校验 `blocks_per_group`/`inodes_per_group` 非零
+  - 挂载损坏/恶意镜像时返回 NULL 而非触发除零 panic
+- **F7**: Shell `cp` 命令修复 — 改为流式读写，支持任意大小文件
+  - 修复前：>4095 字节文件静默截断，仍提示"Copied to"
+  - 修复后：边读边写循环，显示实际复制的字节数
+
+### 🟡 中 (Medium)
+- **F4**: SMP 调度器死锁修复 — 按 CPU ID 大小顺序加锁，消除 AB-BA 死锁
+  - `pit_handler.c` 硬编码 `smp_schedule(0)` → `smp_schedule(current_cpu_id())` 恢复双向负载均衡
+- **F5**: 安全特性文档诚实标注 — README 明确标注 seccomp/capability/mmap ASLR 的实际接入状态
+  - seccomp: 检查框架已实现，缺少设置系统调用（当前始终通过）
+  - Capability: 框架已实现，未在 syscall 中强制校验
+  - mmap ASLR: 已实现 `aslr_randomize_mmap`，未接入 `sys_mmap`
+- **F6**: 控制台键盘缓冲区添加自旋锁 — `inbuf` 串行化保护，SAM  "中断处理 vs Shell 任务" 并发安全
+
+### 🔵 低 (Low)
+- **F8**: `pagetable.c` 文件头注释修正 — SMAP/SMEP 状态从 "Enables" 改为 "NOT YET ENABLED"
+- **F9**: Makefile 版本号同步 — `v3.6.0` → `v3.8.0`（从 `version.h` 独立维护）
+
+### 版本控制
+- 版本号从 v3.8.0 升级至 v3.9.0
+
+---
+
 ## v3.8.0 (2026-07-05) — Audit Report Round 2: Accuracy & Honesty
 
 ### 合规性报告路径修正

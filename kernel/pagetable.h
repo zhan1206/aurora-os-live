@@ -52,6 +52,7 @@ uint64_t *phys_to_virt(uint64_t pa);
 
 void page_table_init(void);
 uint64_t get_kernel_cr3(void);
+uint64_t read_cr3(void);
 
 /*
  * clone_current_pml4: COW-aware deep clone of user-space page tables.
@@ -80,6 +81,13 @@ int map_range(uint64_t pml4_phys, uint64_t vaddr, uint64_t paddr, uint64_t size,
  * only when ref_count reaches 0.
  */
 void free_pagetable(uint64_t pml4_phys);
+
+/*
+ * user_page_present: Check if a user virtual address is mapped in the
+ * current page table. Used by copy_from_user/copy_to_user to avoid
+ * kernel panics when accessing unmapped user addresses.
+ */
+int user_page_present(uint64_t vaddr);
 
 /*
  * pf_handler_c: Page fault handler with COW support.

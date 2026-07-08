@@ -1414,50 +1414,73 @@ static void do_cp_cmd(const char *args) {
     memcpy(src_buf, src, copy_len);
     src_buf[copy_len] = '\0';
 
-    /* Read source file */
+    /* Read source file and write to destination in streaming mode.
+     * Use a 4KB buffer to avoid loading the entire file into memory,
+     * which would silently truncate files > 4095 bytes. */
     struct file *fsrc = vfs_open(src_buf, 0);
     if (!fsrc) {
         console_error_with_hint("cp: source not found", src_buf);
         return;
     }
-    char buf[4096];
-    ssize_t total = 0;
-    ssize_t r;
-    while ((r = vfs_read(fsrc, buf + total, sizeof(buf) - (size_t)total - 1)) > 0) {
-        total += r;
-        if ((size_t)total >= sizeof(buf) - 1) break;
-    }
-    vfs_close(fsrc);
-    buf[total] = '\0';
 
-    /* Create/open destination and write */
+    /* Create/open destination file for writing */
     struct file *fdst = vfs_open(dst, 0);
     if (!fdst) {
         /* Create new file if destination doesn't exist */
         extern int ramfs_add_file(const char *name, const char *content);
-        (void)src_len;
+        /* For new files, read entire source first, then create */
+        char buf[4096];
+        ssize_t total = 0;
+        ssize_t r;
+        while ((r = vfs_read(fsrc, buf + total, sizeof(buf) - (size_t)total - 1)) > 0) {
+            total += r;
+            if ((size_t)total >= sizeof(buf) - 1) break;
+        }
+        vfs_close(fsrc);
+        buf[total] = '\0';
+
         if (ramfs_add_file(dst, buf) == 0) {
             console_write_ansi(SHELL_CMD_OK);
             console_write("Copied to ");
             console_write(dst);
             console_write_ansi(SGR_RESET);
             console_putc('\n');
-            return;
+        } else {
+            console_error_with_hint("cp: cannot create destination", dst);
         }
-        console_error_with_hint("cp: cannot create destination", dst);
         return;
     }
-    ssize_t wrote = vfs_write(fdst, buf, (size_t)total);
-    vfs_close(fdst);
-    if (wrote >= 0) {
-        console_write_ansi(SHELL_CMD_OK);
-        console_write("Copied to ");
-        console_write(dst);
-        console_write_ansi(SGR_RESET);
-        console_putc('\n');
-    } else {
-        console_error_with_hint("cp: write failed", dst);
+
+    /* Streaming copy: read chunk, write chunk, repeat until EOF.
+     * This handles files of any size without truncation. */
+    char buf[4096];
+    ssize_t total_copied = 0;
+    ssize_t r;
+    while ((r = vfs_read(fsrc, buf, sizeof(buf))) > 0) {
+        ssize_t w = vfs_write(fdst, buf, (size_t)r);
+        if (w < 0) {
+            console_error_with_hint("cp: write failed", dst);
+            vfs_close(fsrc);
+            vfs_close(fdst);
+            return;
+        }
+        total_copied += w;
     }
+    vfs_close(fsrc);
+    vfs_close(fdst);
+
+    if (r < 0) {
+        console_error_with_hint("cp: read error", src_buf);
+        return;
+    }
+
+    console_write_ansi(SHELL_CMD_OK);
+    console_write("Copied ");
+    console_write_itoa((int)total_copied);
+    console_write(" bytes to ");
+    console_write(dst);
+    console_write_ansi(SGR_RESET);
+    console_putc('\n');
 }
 
 static void do_welcome_cmd(const char *args) {

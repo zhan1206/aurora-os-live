@@ -8,6 +8,7 @@
 #include "include/log.h"
 #include "include/portio.h"
 #include "include/theme.h"
+#include "smp.h"
 #include <stdint.h>
 #include <string.h>
 
@@ -649,6 +650,7 @@ void console_init(void) {
     for (int i = 0; i < ROWS * COLS; ++i) VGA_BUF[i] = fill;
     cursor_row = 0; cursor_col = 0;
     current_attr = 0x07;
+    spin_init(&inbuf_lock);
     update_hw_cursor();
 }
 
@@ -678,6 +680,7 @@ static int  inbuf_cursor = 0;   /* cursor position within line (0..inbuf_len) */
 static int  line_ready   = 0;
 static int  saved_line_len = 0;  /* saved length when line becomes ready */
 static int  insert_mode  = 1;   /* 1 = insert, 0 = overwrite */
+static spinlock_t inbuf_lock;     /* protects inbuf from SMP concurrent access */
 
 /* Escape sequence state machine */
 #define ESC_STATE_NORMAL   0
@@ -772,9 +775,12 @@ const char *console_get_current_line(void) {
 void console_input_char(char c) {
     int max_cols = g_use_fb ? (int)g_fb_cols : COLS;
 
+    spin_lock(&inbuf_lock);
+
     /* --- Escape sequence state machine --- */
     if (esc_state == ESC_STATE_NORMAL && c == '\x1b') {
         esc_state = ESC_STATE_ESC;
+        spin_unlock(&inbuf_lock);
         return;
     }
     if (esc_state == ESC_STATE_ESC) {
@@ -782,18 +788,22 @@ void console_input_char(char c) {
             esc_state = ESC_STATE_CSI;
             esc_params[0] = esc_params[1] = esc_params[2] = 0;
             esc_param_idx = 0;
+            spin_unlock(&inbuf_lock);
             return;
         }
         esc_state = ESC_STATE_NORMAL;
+        spin_unlock(&inbuf_lock);
         return;
     }
     if (esc_state == ESC_STATE_CSI) {
         if (c >= '0' && c <= '9') {
             esc_params[esc_param_idx] = esc_params[esc_param_idx] * 10 + (c - '0');
+            spin_unlock(&inbuf_lock);
             return;
         }
         if (c == ';') {
             if (esc_param_idx < 2) esc_param_idx++;
+            spin_unlock(&inbuf_lock);
             return;
         }
         /* Final character of CSI sequence */
@@ -803,9 +813,11 @@ void console_input_char(char c) {
         switch (c) {
             case 'A': /* Up arrow — history */
                 if (line_history_cb) line_history_cb(-1);
+                spin_unlock(&inbuf_lock);
                 return;
             case 'B': /* Down arrow — history */
                 if (line_history_cb) line_history_cb(1);
+                spin_unlock(&inbuf_lock);
                 return;
             case 'C': /* Right arrow */
                 if (inbuf_cursor < inbuf_len) {
@@ -816,6 +828,7 @@ void console_input_char(char c) {
                     if (col >= max_cols) { col = 0; row++; }
                     console_set_cursor(row, col);
                 }
+                spin_unlock(&inbuf_lock);
                 return;
             case 'D': /* Left arrow */
                 if (inbuf_cursor > 0) {
@@ -826,6 +839,7 @@ void console_input_char(char c) {
                     else if (row > 0) { row--; col = max_cols - 1; }
                     console_set_cursor(row, col);
                 }
+                spin_unlock(&inbuf_lock);
                 return;
             case 'H': /* Home */
                 if (inbuf_cursor > 0) {
@@ -840,6 +854,7 @@ void console_input_char(char c) {
                     console_set_cursor(row, col);
                     inbuf_cursor = 0;
                 }
+                spin_unlock(&inbuf_lock);
                 return;
             case 'F': /* End */
                 if (inbuf_cursor < inbuf_len) {
@@ -853,6 +868,7 @@ void console_input_char(char c) {
                     console_set_cursor(row, col);
                     inbuf_cursor = inbuf_len;
                 }
+                spin_unlock(&inbuf_lock);
                 return;
             case '~':
                 if (p0 == 3) { /* Delete key */
@@ -864,8 +880,10 @@ void console_input_char(char c) {
                         line_redraw_from_cursor(old_len);
                     }
                 }
+                spin_unlock(&inbuf_lock);
                 return;
             default:
+                spin_unlock(&inbuf_lock);
                 return;
         }
     }
@@ -878,6 +896,7 @@ void console_input_char(char c) {
         line_ready = 1;
         inbuf_len = 0;
         inbuf_cursor = 0;
+        spin_unlock(&inbuf_lock);
         return;
     }
     if (c == '\b') {
@@ -896,6 +915,7 @@ void console_input_char(char c) {
             console_set_cursor(row, col);
             line_redraw_from_cursor(old_len);
         }
+        spin_unlock(&inbuf_lock);
         return;
     }
     /* Tab completion: invoke callback if registered, else expand to spaces */
@@ -928,10 +948,14 @@ void console_input_char(char c) {
                 }
             }
         }
+        spin_unlock(&inbuf_lock);
         return;
     }
     /* Ignore other control characters */
-    if (c < ' ') return;
+    if (c < ' ') {
+        spin_unlock(&inbuf_lock);
+        return;
+    }
 
     if (inbuf_len < INBUF_SIZE - 1) {
         if (insert_mode && inbuf_cursor < inbuf_len) {
@@ -957,16 +981,22 @@ void console_input_char(char c) {
             }
         }
     }
+    spin_unlock(&inbuf_lock);
 }
 
 int console_getline(char *buf, size_t buflen) {
-    if (!line_ready) return 0;
+    spin_lock(&inbuf_lock);
+    if (!line_ready) {
+        spin_unlock(&inbuf_lock);
+        return 0;
+    }
     size_t tocopy = (size_t)saved_line_len < buflen - 1 ? (size_t)saved_line_len : buflen - 1;
     if (buf && buflen > 0) {
         memcpy(buf, inbuf, tocopy);
         buf[tocopy] = '\0';
     }
     line_ready = 0;
+    spin_unlock(&inbuf_lock);
     return (int)tocopy;
 }
 

@@ -383,7 +383,7 @@ static void ip_handle_packet(struct net_device *netdev,
         udp_handle_packet(ip->src_ip, payload, payload_len);
         break;
     case IP_PROTO_TCP:
-        tcp_handle_packet(ip->src_ip, payload, payload_len);
+        tcp_handle_packet(ip->src_ip, ip->dst_ip, payload, payload_len);
         break;
     default:
         break;
@@ -935,6 +935,7 @@ static struct tcp_socket *tcp_find_listener(uint16_t port) {
 }
 
 static void tcp_handle_packet(const uint8_t src_ip[4],
+                               const uint8_t dst_ip[4],
                                const uint8_t *data, int len) {
     if (len < (int)sizeof(struct tcp_hdr)) return;
 
@@ -954,7 +955,7 @@ static void tcp_handle_packet(const uint8_t src_ip[4],
     spin_lock(&tcp_lock);
 
     struct tcp_socket *sock = tcp_find_by_addr(src_ip, src_port,
-                                                src_ip, dst_port);
+                                                dst_ip, dst_port);
     if (!sock) {
         /* Also try matching by just remote address (for SYN_SENT) */
         int i;

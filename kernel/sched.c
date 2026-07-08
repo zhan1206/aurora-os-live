@@ -770,9 +770,16 @@ void smp_schedule(int my_cpu_id) {
 
     struct run_queue *src_rq = &per_cpu_rq[busiest_cpu];
 
-    /* Lock both queues to prevent concurrent modification */
-    spin_lock(&my_rq->lock);
-    spin_lock(&src_rq->lock);
+    /* Lock both queues in deterministic order (lower CPU ID first) to
+     * prevent AB-BA deadlock when multiple CPUs try to steal from each
+     * other simultaneously. */
+    if (my_cpu_id < busiest_cpu) {
+        spin_lock(&my_rq->lock);
+        spin_lock(&src_rq->lock);
+    } else {
+        spin_lock(&src_rq->lock);
+        spin_lock(&my_rq->lock);
+    }
 
     /* Re-check counts after acquiring locks */
     if (my_rq->count > 1 || src_rq->count <= 1) {

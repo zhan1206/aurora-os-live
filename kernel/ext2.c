@@ -991,6 +991,17 @@ struct super_block *ext2_mount(struct block_device *bdev) {
     sbi->inodes_per_group = sbi->sb_raw->s_inodes_per_group;
     sbi->inode_size       = sbi->sb_raw->s_inode_size;
     if (sbi->inode_size == 0) sbi->inode_size = 128;
+
+    /* Validate critical fields: zero blocks_per_group or inodes_per_group
+     * indicate a corrupted or malicious superblock. Division by zero in
+     * group count computation would trigger a panic. */
+    if (sbi->blocks_per_group == 0 || sbi->inodes_per_group == 0) {
+        log_printf(LOG_LEVEL_ERR, "ext2: corrupted superblock: blocks_per_group=%u inodes_per_group=%u\n",
+                   sbi->blocks_per_group, sbi->inodes_per_group);
+        kfree(sbi->sb_raw);
+        kfree(sbi);
+        return NULL;
+    }
     sbi->first_data_block = sbi->sb_raw->s_first_data_block;
 
     /* Compute number of block groups */

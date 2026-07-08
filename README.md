@@ -4,7 +4,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Lines of Code](https://img.shields.io/badge/code-~26,500%20lines-blue)](kernel/)
 [![Self Tests](https://img.shields.io/badge/tests-13/13-brightgreen)](kernel/selftest.c)
-[![Version](https://img.shields.io/badge/version-v3.8.0-blue)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-v3.9.0-blue)](CHANGELOG.md)
 
 **100% 自研代码** | 无 Linux 内核代码 | 无第三方内核组件
 
@@ -264,7 +264,7 @@ AuroraOS
 - **Slab 分配器**: 8 个大小类（32B–4096B），小对象高效复用
 - **E820 解析**: 支持 Multiboot1 和 Multiboot2 内存信息
 - **COW**: 写时复制页面克隆，按需分配
-- **ASLR**: 地址空间布局随机化（xorshift64 PRNG）
+- **ASLR**: 栈地址空间布局随机化（xorshift64 PRNG）
 
 ### 进程管理
 - **五状态模型**: RUNNING → READY → BLOCKED → ZOMBIE → DEAD
@@ -334,12 +334,12 @@ AuroraOS
 - **默认动作**: 终止/忽略/核心转储
 
 ### 安全机制
-- **ASLR**: 地址空间布局随机化
+- **ASLR**: 栈随机化（已启用）；mmap 随机化（已实现，未接入 sys_mmap 调用路径）
 - **Stack Protector**: 栈溢出保护（canary 检查）
 - **SMAP/SMEP**: 内核访问/执行用户空间内存保护（计划中，需页表审计）
-- **seccomp**: 系统调用过滤
-- **Capability**: 权能安全机制
-- **内核模块签名**: 模块签名验证演示（占位实现，尚未启用）
+- **seccomp**: 系统调用过滤框架（已实现 seccomp_check，缺少设置系统调用，当前始终通过）
+- **Capability**: 文件描述符权能框架（已实现，未在 syscall 中强制校验）
+- **内核模块签名**: 演示性占位实现（未启用，XOR 哈希 + 硬编码密钥）
 - **整数溢出保护**: 关键内存分配路径溢出检查
 - **NULL 指针保护**: 系统调用关键路径 NULL 检查
 
