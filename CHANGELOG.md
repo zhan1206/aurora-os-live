@@ -47,7 +47,10 @@
 - self_development_audit.md: 审计日期更新至 2026-07-09
 - tech_research.md: 研究日期更新至 2026-07-09
 - test_report.md: 测试日期和版本更新至 2026-07-09 / v3.9.0
-- .gitignore: 移除 AI 编程相关注释
+- README.md: 文件数统计更新（52 C/32 H/2 S），系统调用数 35+→45，UEFI FAQ 修正
+- modules.md: 调度器 Round Robin→VRFair，路径遍历 '.'→仅拒绝 '..'，procfs 补全 maps/cmdline，模块依赖图补全全部模块
+- user_manual.md: 日期更新至 2026-07-09，文件大小 FAQ 修正
+- api.md: 系统调用概述更新为 45 个
 
 ### 版本控制
 - 版本号: v3.9.1（基于 v3.9.0 的复审修复增强版）

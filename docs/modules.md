@@ -87,15 +87,17 @@ PTE_NX      (1<<63)  - 禁止执行
 **任务状态机**:
 ```
 READY ──→ RUNNING ──→ BLOCKED
-  ↑                    │
-  └────────────────────┘
-         │
-         └──→ ZOMBIE ──→ DEAD
+  ↑         │           │
+  └─────────┴───────────┘
+            │
+            └──→ ZOMBIE ──→ DEAD
 ```
 
-**调度策略**: 轮转调度 (Round Robin)
+**调度策略**: VRFair (CFS/EEVDF 启发式)
+- 基于 vruntime 的公平调度
 - 时间片: 10ms
-- 所有 READY 状态任务按链表顺序轮转
+- 按 vruntime 最小者优先调度，必要时回退轮转
+- 支持 per-CPU 运行队列和负载均衡
 
 **关键数据结构**:
 ```c
@@ -129,7 +131,7 @@ struct task_struct {
 - `vfs_get_root_sb()`: 获取根超级块
 
 **安全特性**:
-- 路径遍历防护：拒绝 "." 和 ".." 路径组件
+- 路径遍历防护：拒绝 ".." 路径组件，允许 "." 作为当前目录
 - 组件名长度限制：最大 255 字节
 
 **关键数据结构**:
@@ -332,6 +334,8 @@ switch(num) → sys_read/sys_write/sys_fork/...
 - **内核命令行**: `/proc/cmdline` — 引导参数
 - **内核日志**: `/proc/kmsg` — 日志环形缓冲区内容（受 CoolPotOS 内核日志子系统启发）
 - **进程信息**: `/proc/self/stat` — 当前运行进程状态
+- **内存映射**: `/proc/self/maps` — 进程虚拟内存映射
+- **命令行**: `/proc/self/cmdline` — 进程命令行参数
 
 **关键数据结构**:
 ```c
@@ -424,24 +428,44 @@ main.c
  │    └── pagetable.c / pagetable.h
  │         └── elfloader.c / elf.h
  ├── sched.c / sched.h
- │    └── signal.c / signal.h
+ │    ├── signal.c / signal.h
+ │    └── smp.c / smp.h
  ├── irq.c
  │    ├── keyboard.c
  │    ├── pit.c / pit_handler.c
- │    └── exception.c
+ │    ├── exception.c
+ │    ├── apic.c / apic.h
+ │    └── rtc.c / rtc.h
  ├── vfs.c / vfs.h
  │    ├── fs.c / fs.h
  │    ├── ramfs.c
  │    ├── file.c
- │    └── pipe.c
+ │    ├── pipe.c
+ │    ├── devtmpfs.c / devtmpfs.h
+ │    ├── procfs.c / procfs.h
+ │    ├── ext2.c / ext2.h
+ │    ├── fat32.c / fat32.h
+ │    └── journal.c / journal.h
  ├── syscall.c / syscall.h / syscall_entry.c
  ├── shell.c / shell.h
  │    ├── layout.h
  │    ├── include/theme.h
  │    └── explain.c
  ├── capability.c / capability.h
+ ├── seccomp.c / seccomp.h
+ ├── aslr.c / aslr.h
+ ├── module.c / module.h
+ │    └── module_sign.c
+ ├── sysctl.c / sysctl.h
+ ├── perf.c / perf.h
+ ├── block_dev.c / block_dev.h
+ │    ├── ramdisk.c
+ │    ├── virtio_blk.c / virtio.h
+ │    └── virtio_net.c / netdev.h
  ├── log.c
  ├── print.c
  ├── string.c
+ ├── fsck.c / fsck.h
+ ├── stack_protect.c / stack_protect.h
  └── selftest.c
 ```

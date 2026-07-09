@@ -234,18 +234,18 @@ x86_64-elf-gdb build/kernel.elf \
 
 ```
 AuroraOS
-├── kernel/           # 内核源码（30 个 C 文件，22 个头文件，2 个汇编）
+├── kernel/           # 内核源码（52 个 C 文件，32 个头文件，2 个汇编）
 │   ├── entry.S       # Multiboot1 入口 + 32→64 位模式自切换
 │   ├── mem.c/h       # 伙伴系统物理页分配器 + Slab 内核堆
 │   ├── pagetable.c/h # x86_64 四级页表 + COW 写时复制
-│   ├── sched.c/h     # 轮转调度器 + 进程树 + 五状态机
-│   ├── syscall.c/h   # 22 个系统调用 + 6 参数 ABI
+│   ├── sched.c/h     # VRFair 调度器（CFS/EEVDF 启发式）+ 进程树 + 五状态机
+│   ├── syscall.c/h   # 45 个系统调用 + 6 参数 ABI
 │   ├── signal.c/h    # POSIX 信号框架（5 种信号）
-│   ├── vfs.c/h       # VFS 层 + dentry 缓存
+│   ├── vfs.c/h       # VFS 层 + dentry 缓存 + LRU 驱逐
 │   ├── console.c/h   # VGA 文本模式 + ANSI + 行编辑
 │   ├── keyboard.c    # PS/2 键盘驱动 + E0 键处理
 │   ├── selftest.c    # 内核自测试（13 项）
-│   └── include/      # 公共头文件
+│   └── include/      # 公共头文件（17 个）
 ├── arch/x86_64/      # 架构相关汇编（10 个文件）
 ├── userspace/        # 用户态程序
 ├── docs/             # 设计文档 + API 文档 + 调试报告
@@ -425,7 +425,7 @@ A: 将 `os.iso` 写入 U 盘：
 ```bash
 sudo dd if=os.iso of=/dev/sdX bs=4M status=progress
 ```
-**注意**: 当前版本仅支持传统 BIOS 启动，不支持 UEFI。
+**注意**: 支持传统 BIOS 和 UEFI 两种启动方式。UEFI 启动使用 `make uefi` 编译。
 
 ### Q: 如何添加新的系统调用？
 A: 1) 在 `kernel/syscall.h` 中添加编号；2) 在 `kernel/syscall.c` 中实现处理函数；3) 在 `handle_syscall` 的 switch 中添加 case。
