@@ -261,7 +261,9 @@ struct super_block *ramfs_create(void) {
 
 int ramfs_add_file(const char *name, const char *content) {
     if (!ramfs_root) return -1;
-    if (!name || !content) return -1;
+    if (!name) return -1;
+    /* Allow empty content (will create a zero-length file) */
+    if (!content) content = "";
 
     /* Check for duplicate file names */
     struct ramfs_node *existing = ramfs_root->next;

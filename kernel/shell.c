@@ -1426,29 +1426,21 @@ static void do_cp_cmd(const char *args) {
     /* Create/open destination file for writing */
     struct file *fdst = vfs_open(dst, 0);
     if (!fdst) {
-        /* Create new file if destination doesn't exist */
+        /* Create new file if destination doesn't exist.
+         * First create zero-length file, then open and stream-write
+         * to avoid truncation for files > 4KB. */
         extern int ramfs_add_file(const char *name, const char *content);
-        /* For new files, read entire source first, then create */
-        char buf[4096];
-        ssize_t total = 0;
-        ssize_t r;
-        while ((r = vfs_read(fsrc, buf + total, sizeof(buf) - (size_t)total - 1)) > 0) {
-            total += r;
-            if ((size_t)total >= sizeof(buf) - 1) break;
-        }
-        vfs_close(fsrc);
-        buf[total] = '\0';
-
-        if (ramfs_add_file(dst, buf) == 0) {
-            console_write_ansi(SHELL_CMD_OK);
-            console_write("Copied to ");
-            console_write(dst);
-            console_write_ansi(SGR_RESET);
-            console_putc('\n');
-        } else {
+        if (ramfs_add_file(dst, "") != 0) {
+            vfs_close(fsrc);
             console_error_with_hint("cp: cannot create destination", dst);
+            return;
         }
-        return;
+        fdst = vfs_open(dst, 0);
+        if (!fdst) {
+            vfs_close(fsrc);
+            console_error_with_hint("cp: cannot open created destination", dst);
+            return;
+        }
     }
 
     /* Streaming copy: read chunk, write chunk, repeat until EOF.

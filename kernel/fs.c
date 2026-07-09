@@ -86,7 +86,7 @@ void fs_init(void) {
                            (unsigned long long)ext2_blocks,
                            (unsigned long long)journal_blocks);
 
-                if (journal_init(ramdisk, ext2_blocks, journal_blocks, block_size) == 0) {
+                if (journal_init(ramdisk, ext2_blocks, journal_blocks, block_size, ext2_blocks) == 0) {
                     if (!journal_is_clean()) {
                         log_printf(LOG_LEVEL_WARN, "fs: journal was dirty — recovery performed\n");
                     } else {

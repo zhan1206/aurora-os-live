@@ -32,6 +32,12 @@ else
   OBJCOPY := $(OC_CROSS)
 endif
 
+# Auto-detect version from version.h (single source of truth)
+AURORAOS_MAJOR := $(shell grep 'AURORAOS_MAJOR' kernel/include/version.h | grep -o '[0-9]\+' | head -1)
+AURORAOS_MINOR := $(shell grep 'AURORAOS_MINOR' kernel/include/version.h | grep -o '[0-9]\+' | head -1)
+AURORAOS_PATCH := $(shell grep 'AURORAOS_PATCH' kernel/include/version.h | grep -o '[0-9]\+' | head -1)
+AURORAOS_VERSION := v$(AURORAOS_MAJOR).$(AURORAOS_MINOR).$(AURORAOS_PATCH)
+
 # Base flags (build date and git hash are auto-detected)
 BUILD_DATE := $(shell date -u +'%Y-%m-%d %H:%M' 2>/dev/null || echo "unknown")
 GIT_HASH   := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
@@ -160,7 +166,7 @@ help:
 
 # Show version information
 version:
-	@echo "AuroraOS v3.8.0"
+	@echo "AuroraOS $(AURORAOS_VERSION)"
 	@echo "  Build date: $(BUILD_DATE)"
 	@echo "  Git hash:   $(GIT_HASH)"
 	@echo "  Build type: $(BUILD_TYPE)"

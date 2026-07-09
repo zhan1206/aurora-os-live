@@ -136,6 +136,25 @@ static void dentry_add_child(struct dentry *parent, struct dentry *child) {
     parent->child = child;
 }
 
+/* Remove child from parent's child linked list. Must be called under vfs_lock. */
+static void dentry_remove_child(struct dentry *child) {
+    struct dentry *parent = child->parent;
+    if (!parent) return;
+
+    struct dentry **prev = &parent->child;
+    struct dentry *cur = parent->child;
+    while (cur) {
+        if (cur == child) {
+            *prev = cur->next;
+            child->next = NULL;
+            child->parent = NULL;
+            return;
+        }
+        prev = &cur->next;
+        cur = cur->next;
+    }
+}
+
 static struct dentry *dentry_lookup_child(struct dentry *parent,
                                            const char *name) {
     struct dentry *d = parent->child;
@@ -260,6 +279,10 @@ void vfs_dentry_evict(void) {
 
         /* Remove from LRU list */
         lru_del(d);
+
+        /* Remove from parent's child linked list to prevent use-after-free
+         * when parent's dentry is later traversed via dentry_lookup_child. */
+        dentry_remove_child(d);
 
         /* Free the inode if it's only referenced by this dentry */
         if (d->inode) {
@@ -389,6 +412,11 @@ struct inode *vfs_lookup(const char *path) {
                 /* Negative dentry: component not found */
                 return NULL;
             }
+
+            /* Set the inode->dentry back-pointer so file operations
+             * can reference the dentry for refcount tracking. */
+            child->inode->dentry = child;
+
             cur = child;
         }
 
@@ -412,6 +440,13 @@ struct file *vfs_open(const char *path, int flags) {
     filp->inode    = inode;
     filp->flags    = flags;
     filp->refcount = 1;
+
+    /* Increment dentry refcount to prevent eviction while this file
+     * is open. Without this, any dentry can be evicted even if files
+     * or cwd reference it. */
+    if (inode->dentry) {
+        inode->dentry->refcount++;
+    }
 
     if (inode->ops && inode->ops->open) {
         if (inode->ops->open(inode, filp) < 0) {
@@ -443,6 +478,14 @@ int vfs_close(struct file *filp) {
 
     if (filp->inode && filp->inode->ops && filp->inode->ops->close)
         filp->inode->ops->close(filp->inode, filp);
+
+    /* Decrement dentry refcount to allow eviction when no files
+     * reference this dentry. */
+    if (filp->inode && filp->inode->dentry) {
+        if (filp->inode->dentry->refcount > 0)
+            filp->inode->dentry->refcount--;
+    }
+
     kfree(filp);
     return 0;
 }

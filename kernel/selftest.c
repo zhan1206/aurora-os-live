@@ -468,7 +468,7 @@ static void test_journal(void) {
     }
 
     /* Initialize journal */
-    int ret = journal_init(ramdisk, journal_start, journal_blocks, block_size);
+    int ret = journal_init(ramdisk, journal_start, journal_blocks, block_size, journal_start);
     if (ret != 0) {
         TEST_FAIL("journal_init");
         return;

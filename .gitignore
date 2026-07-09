@@ -30,7 +30,7 @@ kernel/embedded_files.c
 userspace/hello
 userspace/shell
 
-# AI assistant data
+# IDE/editor config
 .codebuddy/
 .trae/
 

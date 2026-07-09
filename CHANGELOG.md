@@ -1,6 +1,6 @@
 # AuroraOS Changelog
 
-## v3.9.0 (2026-07-05) — 9 Critical Bug Fixes
+## v3.9.1 (2026-07-09) — 复审报告修复与质量提升
 
 ### 🔴 严重 (Critical)
 - **F1**: 缺页异常处理改进 — `copy_from_user`/`copy_to_user` 现在逐页检查 PT 映射，未映射地址返回 -EFAULT 而非触发内核 panic
@@ -9,13 +9,17 @@
 - **F2**: TCP 连接查找修复 — `tcp_handle_packet` 正确传入 `dst_ip` 而非 `src_ip`
   - 修复前：跨主机 TCP 收包（非 loopback）因 `tcp_find_by_addr` 匹配 `local_ip` 失败而静默丢弃
   - `tcp_handle_packet()` 签名增加 `dst_ip` 参数，`ip_handle_packet()` 传入 `ip->dst_ip`
+- **G1**: VFS dentry 缓存 use-after-free 修复（复审新发现）
+  - 驱逐时新增 `dentry_remove_child()` 从父目录 child 链表摘除，防止悬空指针
+  - `vfs_open()` 递增 dentry refcount，`vfs_close()` 递减，使打开文件/cwd 不被驱逐
 
 ### 🟠 高 (High)
 - **F3**: EXT2 挂载零值校验 — 校验 `blocks_per_group`/`inodes_per_group` 非零
   - 挂载损坏/恶意镜像时返回 NULL 而非触发除零 panic
 - **F7**: Shell `cp` 命令修复 — 改为流式读写，支持任意大小文件
   - 修复前：>4095 字节文件静默截断，仍提示"Copied to"
-  - 修复后：边读边写循环，显示实际复制的字节数
+  - 修复后：目标不存在时先创建空文件再流式拷贝，边读边写循环
+  - `ramfs_add_file()` 支持 NULL content 创建零长度文件
 
 ### 🟡 中 (Medium)
 - **F4**: SMP 调度器死锁修复 — 按 CPU ID 大小顺序加锁，消除 AB-BA 死锁
@@ -24,14 +28,29 @@
   - seccomp: 检查框架已实现，缺少设置系统调用（当前始终通过）
   - Capability: 框架已实现，未在 syscall 中强制校验
   - mmap ASLR: 已实现 `aslr_randomize_mmap`，未接入 `sys_mmap`
-- **F6**: 控制台键盘缓冲区添加自旋锁 — `inbuf` 串行化保护，SAM  "中断处理 vs Shell 任务" 并发安全
+- **F6**: 控制台键盘缓冲区添加自旋锁 — `inbuf` 串行化保护，SAM "中断处理 vs Shell 任务" 并发安全
+- **G2**: 日志重放增加文件系统块范围校验（复审新发现）
+  - `journal_init()` 新增 `fs_total_blocks` 参数，`journal_recover()` 重放前校验 `jdb_fs_block < fs_total_blocks`
+  - 损坏日志无法将数据写入文件系统范围外的区域
 
 ### 🔵 低 (Low)
 - **F8**: `pagetable.c` 文件头注释修正 — SMAP/SMEP 状态从 "Enables" 改为 "NOT YET ENABLED"
-- **F9**: Makefile 版本号同步 — `v3.6.0` → `v3.8.0`（从 `version.h` 独立维护）
+- **F9**: Makefile 版本号自动化 — 从 `kernel/include/version.h` 动态提取 MAJOR/MINOR/PATCH
+  - 修复前：硬编码 `v3.8.0`，与 `version.h` 的 `v3.9.0` 不一致
+  - 修复后：`AURORAOS_VERSION` 自动从 `version.h` 提取，消除反复不同步问题
+
+### 文档更新
+- architecture-visual.md: v3.0.0 → v3.9.0，日期更新至 2026-07-09
+- architecture.md: 版本更新至 3.9.0，未来规划替换为 v4.0/v4.5/v5.0 路线图
+- compliance_report.md: 审计日期和版本更新至 2026-07-09 / v3.9.0
+- demo-guide.md: v3.0.0 → v3.9.0，日期更新至 2026-07-09
+- self_development_audit.md: 审计日期更新至 2026-07-09
+- tech_research.md: 研究日期更新至 2026-07-09
+- test_report.md: 测试日期和版本更新至 2026-07-09 / v3.9.0
+- .gitignore: 移除 AI 编程相关注释
 
 ### 版本控制
-- 版本号从 v3.8.0 升级至 v3.9.0
+- 版本号: v3.9.1（基于 v3.9.0 的复审修复增强版）
 
 ---
 

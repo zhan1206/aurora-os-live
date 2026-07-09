@@ -561,7 +561,8 @@ uint64_t clone_kernel_pml4(void) {
     return (uint64_t)(uintptr_t)newp;
 }
 
-/* ================================================================/*
+/* ================================================================
+/*
  * user_page_present: Check if a user virtual address is mapped and
  * accessible in the current page table. Walks the 4-level page table
  * to verify the user PTE is present.

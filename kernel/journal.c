@@ -145,14 +145,16 @@ static void advance_head(uint64_t n) {
  * ================================================================ */
 
 int journal_init(struct block_device *bdev, uint64_t journal_start,
-                 uint64_t journal_blocks, uint32_t block_size) {
+                 uint64_t journal_blocks, uint32_t block_size,
+                 uint64_t fs_total_blocks) {
     if (!bdev || journal_blocks < 8 || block_size < 512) return -1;
 
     memset(&g_journal, 0, sizeof(g_journal));
-    g_journal.bdev           = bdev;
-    g_journal.block_size     = block_size;
-    g_journal.journal_start  = journal_start;
-    g_journal.journal_blocks = journal_blocks;
+    g_journal.bdev            = bdev;
+    g_journal.block_size      = block_size;
+    g_journal.journal_start   = journal_start;
+    g_journal.journal_blocks  = journal_blocks;
+    g_journal.fs_total_blocks = fs_total_blocks;
 
     /* Allocate block-sized buffer for I/O (stack-allocated structs are too small) */
     uint8_t *io_buf = (uint8_t *)kmalloc(block_size);
@@ -393,6 +395,18 @@ int journal_recover(void) {
         uint32_t sectors_per_block = block_size / g_journal.bdev->block_size;
 
         for (uint32_t i = 0; i < hdr->jbh_num_blocks; i++) {
+            /* Validate that the target block is within the filesystem's own range.
+             * Corrupted journals could contain out-of-bounds block numbers that
+             * would write data to non-filesystem areas (e.g., the journal itself). */
+            if (g_journal.fs_total_blocks > 0 &&
+                jdbs[i].jdb_fs_block >= g_journal.fs_total_blocks) {
+                log_printf(LOG_LEVEL_ERR,
+                           "journal: replay skipped block %llu (out of range, fs has %llu blocks)\n",
+                           (unsigned long long)jdbs[i].jdb_fs_block,
+                           (unsigned long long)g_journal.fs_total_blocks);
+                continue;
+            }
+
             /* Read the data block from the journal */
             uint8_t *data_buf = (uint8_t *)kmalloc(block_size);
             if (!data_buf) continue;

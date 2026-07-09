@@ -105,6 +105,7 @@ struct journal_handle {
     uint32_t             *txn_fs_blocks;   /* fs block numbers in current txn */
     uint8_t            **txn_data;        /* data buffers for current txn */
     int                   dirty;           /* journal needs recovery */
+    uint64_t              fs_total_blocks; /* filesystem total blocks (for replay validation) */
 };
 
 /* ================================================================
@@ -123,7 +124,8 @@ struct journal_handle {
  * If the journal superblock does not exist, a new one is created.
  */
 int journal_init(struct block_device *bdev, uint64_t journal_start,
-                 uint64_t journal_blocks, uint32_t block_size);
+                 uint64_t journal_blocks, uint32_t block_size,
+                 uint64_t fs_total_blocks);
 
 /*
  * journal_begin: Start a new transaction.
