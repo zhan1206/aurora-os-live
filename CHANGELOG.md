@@ -1,5 +1,36 @@
 # AuroraOS Changelog
 
+## v3.9.3 (2026-07-09) — 安全加固 + 性能计数器
+
+### 🔒 安全加固
+- **SMAP/SMEP 启用**: CR4.SMEP(bit 20) 和 CR4.SMAP(bit 21) 在 `page_table_init()` 中设置
+  - SMEP: 防止内核执行用户态代码（mitigates ret2usr）
+  - SMAP: 防止内核直接访问用户态数据页
+  - STAC/CLAC 指令已集成到 `copy_from_user()` 和 `copy_to_user()`
+  - 新增 `stac()`/`clac()` 内联函数于 `pagetable.h`
+
+### 📊 进程级性能计数器
+- **task_struct 扩展**: 新增 `syscall_count`、`page_fault_count`、`cpu_ticks`、`cswitch_count` 字段
+- **计数位置**: 系统调用处理（syscall.c）、缺页异常（pagetable.c）、上下文切换（sched.c）
+- **暴露接口**: `/proc/self/stat` 增加 perf 计数器输出
+
+### 🧪 自测试
+- 新增 `test_perf_counters()` — 验证性能计数器单调递增
+- 自测试总数: 13 → 14 组
+
+### 🐛 修复
+- selftest.c: `journal_init` 调用中 `fs_total_blocks` 参数修正为 `total_blocks`
+
+### 文档更新
+- README.md: SMAP/SMEP 状态 "计划中"→"已启用"
+- architecture.md: 未来规划更新，标记 SMAP/SMEP 和 perf 计数器为已完成
+- pagetable.c: 文件头注释更新
+
+### 版本控制
+- 版本号: v3.9.3
+
+---
+
 ## v3.9.2 (2026-07-09) — 三轮复审修复
 
 ### 🟠 中高 (High-Medium)

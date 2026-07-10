@@ -98,6 +98,12 @@ struct task_struct {
 
     /* --- Security --- */
     struct seccomp_filter *seccomp;  /* syscall filter (NULL = all allowed) */
+
+    /* --- Performance counters --- */
+    uint64_t  syscall_count;   /* total syscalls made by this task */
+    uint64_t  page_fault_count; /* total page faults this task */
+    uint64_t  cpu_ticks;       /* total ticks this task has run */
+    uint64_t  cswitch_count;   /* number of context switches into this task */
 };
 
 #include "signal.h"

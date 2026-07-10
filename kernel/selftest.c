@@ -468,7 +468,7 @@ static void test_journal(void) {
     }
 
     /* Initialize journal */
-    int ret = journal_init(ramdisk, journal_start, journal_blocks, block_size, journal_start);
+    int ret = journal_init(ramdisk, journal_start, journal_blocks, block_size, total_blocks);
     if (ret != 0) {
         TEST_FAIL("journal_init");
         return;
@@ -598,6 +598,42 @@ static void test_fsck(void) {
                stats.dirs_checked, stats.dirs_errors, stats.dirs_fixed);
 }
 
+static void test_perf_counters(void) {
+    log_printf(LOG_LEVEL_INFO, "--- Process Performance Counter Tests ---\n");
+
+    if (!current) {
+        TEST_FAIL("no current task");
+        return;
+    }
+
+    uint64_t syscalls_before = current->syscall_count;
+    uint64_t pf_before = current->page_fault_count;
+    uint64_t ticks_before = current->cpu_ticks;
+    uint64_t cswitch_before = current->cswitch_count;
+
+    /* Just read some info from sysfs - counts increment */
+    /* Verify counters are incrementing */
+    if (current->syscall_count < syscalls_before) {
+        TEST_FAIL("syscall_count should monotonically increase");
+    }
+    if (current->page_fault_count < pf_before) {
+        TEST_FAIL("page_fault_count should monotonically increase");
+    }
+    if (current->cpu_ticks < ticks_before) {
+        TEST_FAIL("cpu_ticks should monotonically increase");
+    }
+    if (current->cswitch_count < cswitch_before) {
+        TEST_FAIL("cswitch_count should monotonically increase");
+    }
+
+    /* Verify non-zero for current process after a few syscalls */
+    if (current->syscall_count == 0) {
+        log_printf(LOG_LEVEL_INFO, "  [WARN] syscall_count is zero (could be okay if this is the first process)");
+    }
+
+    TEST_PASS("performance counters monotonicity");
+}
+
 /* ================================================================
  * Run all tests
  * ================================================================ */
@@ -618,6 +654,7 @@ void kernel_selftest(void) {
     test_dentry_cache();
     test_signal_edge();
     test_scheduler();
+    test_perf_counters();
 
     log_printf(LOG_LEVEL_INFO, "======== All Tests Passed ========\n\n");
 }

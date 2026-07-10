@@ -30,6 +30,17 @@
 #define PTE_PS         0x080ULL  /* Page Size (2MB in PD, 1GB in PDPT) */
 #define PTE_NX         (1ULL << 63)
 
+/* SMAP/SMEP: Supervisor Mode Access/Execution Prevention
+ * STAC sets AC flag (temporarily allow kernel to access user pages).
+ * CLAC clears AC flag (re-enable SMAP protection).
+ * Must be used in pairs around copy_from_user/copy_to_user. */
+static inline void stac(void) {
+    asm volatile ("stac" ::: "memory");
+}
+static inline void clac(void) {
+    asm volatile ("clac" ::: "memory");
+}
+
 /* Page size (may already be defined in mem.h) */
 #ifndef PAGE_SIZE
 #define PAGE_SIZE      4096ULL

@@ -7,7 +7,7 @@
  *   /proc/uptime     - System uptime in seconds
  *   /proc/version    - Kernel version string
  *   /proc/mounts     - List of mounted filesystems
- *   /proc/self/stat  - Current process PID and state
+ *   /proc/self/stat  - Current process PID, state, and perf counters
  *   /proc/self/maps  - Current process memory map (CoolPotOS-inspired)
  *   /proc/self/cmdline - Current process command line (CoolPotOS-inspired)
  *   /proc/interrupts - IRQ vector counts per CPU (CoolPotOS-inspired)
@@ -437,7 +437,7 @@ static int u64toa_hex_append(char *buf, size_t size, uint64_t val) {
  * read_self_stat: Returns current process PID and state.
  */
 static int read_self_stat(char *buf, size_t size) {
-    if (size < 128) return -1;
+    if (size < 256) return -1;
     int len = 0;
 
     if (current) {
@@ -459,6 +459,23 @@ static int read_self_stat(char *buf, size_t size) {
         }
         if (len < (int)size - 1) buf[len++] = state_char;
         if (len < (int)size - 1) buf[len++] = '\n';
+
+        /* Per-process performance counters */
+        len += append_str(buf + len, size - (size_t)len, "syscall_count: ");
+        len += u64toa_append(buf + len, size - (size_t)len, current->syscall_count);
+        len += append_str(buf + len, size - (size_t)len, "\n");
+
+        len += append_str(buf + len, size - (size_t)len, "page_faults: ");
+        len += u64toa_append(buf + len, size - (size_t)len, current->page_fault_count);
+        len += append_str(buf + len, size - (size_t)len, "\n");
+
+        len += append_str(buf + len, size - (size_t)len, "cpu_ticks: ");
+        len += u64toa_append(buf + len, size - (size_t)len, current->cpu_ticks);
+        len += append_str(buf + len, size - (size_t)len, "\n");
+
+        len += append_str(buf + len, size - (size_t)len, "cswitch: ");
+        len += u64toa_append(buf + len, size - (size_t)len, current->cswitch_count);
+        len += append_str(buf + len, size - (size_t)len, "\n");
     }
 
     if (len >= (int)size) len = (int)size - 1;

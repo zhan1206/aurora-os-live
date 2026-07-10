@@ -493,6 +493,9 @@ void schedule(void) {
 
     /* Performance counter: context switch */
     perf_inc(PERF_CTX_SWITCHES);
+    /* Per-process perf counters */
+    current->cpu_ticks++;
+    current->cswitch_count++;
 
     context_switch(&prev->rsp, current->rsp);
 }

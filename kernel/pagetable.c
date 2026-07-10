@@ -16,10 +16,11 @@
  *     allocates a new page, copies content, updates PTE to RW.
  *     (This replaces the old pf_handler_c which just panicked.)
  *
- *   - SMAP/SMEP: NOT YET ENABLED. The code to enable Supervisor Mode Access
- *     Prevention (SMAP) and Supervisor Mode Execution Prevention (SMEP) via
- *     CR4 bits is deferred — needs a full page table audit to ensure all
- *     user/kernel page attributes are correct before enabling.
+ *   - SMAP/SMEP: ENABLED. CR4.SMEP (bit 20) and CR4.SMAP (bit 21) are set
+ *     during page_table_init(). STAC/CLAC instructions are used in
+ *     copy_from_user/copy_to_user to temporarily allow kernel access to
+ *     user pages. This protects against ret2usr and kernel data access
+ *     to user pages.
  */
 
 #include "pagetable.h"
@@ -88,7 +89,12 @@ void page_table_init(void) {
      *
      * CoolPotOS-inspired security hardening.
      */
-    /* SMEP/SMAP deferred for now — needs page table audit */
+    uint64_t cr4;
+    asm volatile ("mov %%cr4, %0" : "=r"(cr4));
+    cr4 |= (1ULL << 20);  /* CR4.SMEP */
+    cr4 |= (1ULL << 21);  /* CR4.SMAP */
+    asm volatile ("mov %0, %%cr4" :: "r"(cr4) : "memory");
+    log_printf(LOG_LEVEL_INFO, "pagetable: SMEP+SMAP enabled (CR4=0x%llx)\n", cr4);
 }
 
 uint64_t get_kernel_cr3(void) {
@@ -622,6 +628,8 @@ void pf_handler_c(uint64_t error_code) {
 
     /* Performance counter: count all page faults */
     perf_inc(PERF_PAGE_FAULTS);
+    /* Per-process page fault counter */
+    if (current) current->page_fault_count++;
 
     int present = (error_code & 1) != 0;
     int write   = (error_code & 2) != 0;

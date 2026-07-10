@@ -387,17 +387,21 @@ ASLR 随机化:
 
 ## 9. 未来规划
 
-> **v3.9 里程碑**: 短期目标（原 v3.1）中的 devtmpfs、/proc/self/maps、45 个 POSIX 系统调用已全部实现。TCP/IP 基础协议栈已就绪。三轮复审共修复 13 个问题（F1–F9, G1–G2, H1–H2）。
+> **v3.9 里程碑**: 短期目标（原 v3.1）中的 devtmpfs、/proc/self/maps、45 个 POSIX 系统调用已全部实现。TCP/IP 基础协议栈已就绪。三轮复审共修复 13 个问题（F1–F9, G1–G2, H1–H2）。SMAP/SMEP 已启用，进程级性能计数器已实现，sysfs 骨架已就绪。
 
-### 紧急（v3.9.2）
+### 紧急（v3.9.2）- 已完成
+- ~~**PIE 支持**~~ → 移至 v4.0
+- ~~**DHCP 客户端**~~ → 移至 v4.0
+- **SMAP/SMEP 启用**: ✅ 已实现 — CR4.SMEP(bit20)/SMAP(bit21) 已设置，STAC/CLAC 已集成到 copy_from/to_user
+- **进程级性能计数器**: ✅ 已实现 — task_struct 增加 syscall_count/page_fault_count/cpu_ticks/cswitch_count，已暴露至 /proc/self/stat
+
+### 紧急（v3.9.3）
 - **PIE 支持**: 当前仅支持固定地址可执行文件，需解析 `.dynamic` 段并实现 `R_X86_64_RELATIVE` 等至少 5 种重定位类型，支持随机基址（ASLR）
 - **DHCP 客户端**: VirtIO 网卡无法获得 IP，需实现 DHCP（RFC 2131）状态机
 
 ### 短期（v4.0）
-- **进程级性能计数器**: 扩展 `task_struct` 添加 `user_time/sys_time/syscall_count`，在上下文切换/系统调用返回/缺页异常中累加，补充 `/proc/[pid]/stat`
 - **DNS 解析器**: 实现 UDP DNS 查询（A 记录），与 DHCP 联动
 - **HTTP 客户端**: 基于 TCP 栈实现 `http_get()`，支持 `wget`/`curl` 风格命令
-- **SMAP/SMEP 启用**: 在页表初始化后设置 CR4 相应位，审计所有用户态指针访问
 - **FAT32 完整支持**: 长文件名（LFN）、目录创建/删除、簇分配回收
 - **squashfs**: 只读压缩文件系统，用于 rootfs 镜像
 - **sysfs**: 内核对象信息导出（设备、总线、驱动）

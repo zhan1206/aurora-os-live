@@ -3,8 +3,8 @@
 [![CI Build](https://github.com/zhan1206/aurora-os/actions/workflows/build.yml/badge.svg)](https://github.com/zhan1206/aurora-os/actions/workflows/build.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Lines of Code](https://img.shields.io/badge/code-~26,500%20lines-blue)](kernel/)
-[![Self Tests](https://img.shields.io/badge/tests-13/13-brightgreen)](kernel/selftest.c)
-[![Version](https://img.shields.io/badge/version-v3.9.2-blue)](CHANGELOG.md)
+[![Self Tests](https://img.shields.io/badge/tests-14/14-brightgreen)](kernel/selftest.c)
+[![Version](https://img.shields.io/badge/version-v3.9.3-blue)](CHANGELOG.md)
 
 **100% 自研代码** | 无 Linux 内核代码 | 无第三方内核组件
 
@@ -336,7 +336,7 @@ AuroraOS
 ### 安全机制
 - **ASLR**: 栈随机化（已启用）；mmap 随机化（已实现，未接入 sys_mmap 调用路径）
 - **Stack Protector**: 栈溢出保护（canary 检查）
-- **SMAP/SMEP**: 内核访问/执行用户空间内存保护（计划中，需页表审计）
+- **SMAP/SMEP**: 内核访问/执行用户空间内存保护（已启用，CR4.SMEP/CR4.SMAP 已设置，STAC/CLAC 已集成）
 - **seccomp**: 系统调用过滤框架（已实现 seccomp_check，缺少设置系统调用，当前始终通过）
 - **Capability**: 文件描述符权能框架（已实现，未在 syscall 中强制校验）
 - **内核模块签名**: 演示性占位实现（未启用，XOR 哈希 + 硬编码密钥）

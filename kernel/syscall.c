@@ -1274,6 +1274,8 @@ void syscall_trap(struct trapframe *tf) {
         uint32_t tsc_lo_start, tsc_hi_start;
         asm volatile ("rdtsc" : "=a"(tsc_lo_start), "=d"(tsc_hi_start));
         long ret = handle_syscall(num, a1, a2, a3, a4, a5, a6);
+        /* Per-process perf counter: track syscall count */
+        if (current) current->syscall_count++;
         uint32_t tsc_lo_end, tsc_hi_end;
         asm volatile ("rdtsc" : "=a"(tsc_lo_end), "=d"(tsc_hi_end));
         uint64_t tsc_diff = (((uint64_t)tsc_hi_end << 32) | tsc_lo_end)

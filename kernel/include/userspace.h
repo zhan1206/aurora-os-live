@@ -61,7 +61,9 @@ static inline int copy_from_user(void *dst, const void *src, size_t size) {
     if (!dst || !src) return -1;
     if (!user_addr_range_ok(src, size)) return -1;
     if (!user_pages_mapped(src, size)) return -1;
+    stac();
     memcpy(dst, src, size);
+    clac();
     return 0;
 }
 
@@ -76,7 +78,9 @@ static inline int copy_to_user(void *dst, const void *src, size_t size) {
     if (!dst || !src) return -1;
     if (!user_addr_range_ok(dst, size)) return -1;
     if (!user_pages_mapped(dst, size)) return -1;
+    stac();
     memcpy(dst, src, size);
+    clac();
     return 0;
 }
 
