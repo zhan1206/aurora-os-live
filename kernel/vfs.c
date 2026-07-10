@@ -441,6 +441,16 @@ struct file *vfs_open(const char *path, int flags) {
     filp->flags    = flags;
     filp->refcount = 1;
 
+    /* Call filesystem-specific open() if available.
+     * NOTE: refcount increment is deferred until after open() succeeds,
+     * to avoid leaking refcount on open() failure (H1 fix). */
+    if (inode->ops && inode->ops->open) {
+        if (inode->ops->open(inode, filp) < 0) {
+            kfree(filp);
+            return NULL;
+        }
+    }
+
     /* Increment dentry refcount to prevent eviction while this file
      * is open. Without this, any dentry can be evicted even if files
      * or cwd reference it. */
@@ -448,12 +458,6 @@ struct file *vfs_open(const char *path, int flags) {
         inode->dentry->refcount++;
     }
 
-    if (inode->ops && inode->ops->open) {
-        if (inode->ops->open(inode, filp) < 0) {
-            kfree(filp);
-            return NULL;
-        }
-    }
     return filp;
 }
 

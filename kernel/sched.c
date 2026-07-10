@@ -606,7 +606,6 @@ void do_exit_current(int code) {
  * ================================================================ */
 
 int waitpid(int pid, int *status, int options) {
-    (void)options;
     if (!current) return -1;
 
     for (;;) {
@@ -657,6 +656,7 @@ int waitpid(int pid, int *status, int options) {
 
                 log_printf(LOG_LEVEL_INFO, "waitpid: collected pid=%d exit_code=%d\n",
                            collected_pid, collected_code);
+
                 return collected_pid;
             }
 
@@ -665,10 +665,14 @@ int waitpid(int pid, int *status, int options) {
         }
 
         /*
-         * No ZOMBIE child found → block until one exits.
-         * The child's do_exit_current will set us back to READY
-         * and the next schedule() will resume us here.
+         * No ZOMBIE child found.
+         * If WNOHANG is set, return 0 immediately (non-blocking).
+         * Otherwise block until a child exits.
          */
+        if (options & WNOHANG) {
+            return 0;
+        }
+
         current->state = TASK_BLOCKED;
         schedule();
 

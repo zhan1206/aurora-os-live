@@ -107,6 +107,9 @@ struct sockaddr_in {
 /* AF_INET = 2 (IPv4) */
 #define AF_INET 2
 
+/* waitpid options */
+#define WNOHANG    1   /* return immediately if no child has exited */
+
 /* Socket types */
 #define SOCK_STREAM 1
 #define SOCK_DGRAM  2

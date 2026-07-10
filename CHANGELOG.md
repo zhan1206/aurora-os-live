@@ -1,5 +1,24 @@
 # AuroraOS Changelog
 
+## v3.9.2 (2026-07-09) — 三轮复审修复
+
+### 🟠 中高 (High-Medium)
+- **H1**: dentry 引用计数泄漏修复 — `vfs_open()` 中 refcount 递增移至 `ops->open()` 成功之后
+  - 修复前：ext2/fat32 文件 `open()` 失败时 refcount 永久多 1，dentry 永不被驱逐
+  - 修复后：失败路径不递增 refcount，消除僵尸条目累积
+- **H2**: `waitpid()` WNOHANG 支持 — 补全非阻塞等待语义
+  - 修复前：`(void)options` 忽略所有选项，无条件阻塞
+  - 修复后：`WNOHANG` 已定义（值 1），无子进程退出时立即返回 0
+
+### 文档与规划更新
+- architecture.md: 未来规划按紧急/短期/中期/长期/测试重新组织，含 PIE/DHCP/红黑树/SMAP/SMEP/NVMe/RISC-V 等详细路线
+- syscall.h: 新增 `WNOHANG` 宏定义
+
+### 版本控制
+- 版本号: v3.9.2
+
+---
+
 ## v3.9.1 (2026-07-09) — 复审报告修复与质量提升
 
 ### 🔴 严重 (Critical)
