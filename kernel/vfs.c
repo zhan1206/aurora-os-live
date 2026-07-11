@@ -464,13 +464,29 @@ struct file *vfs_open(const char *path, int flags) {
 ssize_t vfs_read(struct file *filp, void *buf, size_t count) {
     if (!filp || !filp->inode || !filp->inode->ops || !filp->inode->ops->read)
         return -1;
-    return filp->inode->ops->read(filp, buf, count, &filp->offset);
+    /*
+     * Enable SMAP bypass (STAC) so the filesystem read op can write to
+     * user-space buffers. CLAC restores protection afterward.
+     * Safe even when 'buf' is a kernel pointer (STAC/CLAC only affects
+     * supervisor access to user pages, not kernel pages).
+     */
+    stac();
+    ssize_t ret = filp->inode->ops->read(filp, buf, count, &filp->offset);
+    clac();
+    return ret;
 }
 
 ssize_t vfs_write(struct file *filp, const void *buf, size_t count) {
     if (!filp || !filp->inode || !filp->inode->ops || !filp->inode->ops->write)
         return -1;
-    return filp->inode->ops->write(filp, buf, count, &filp->offset);
+    /*
+     * Enable SMAP bypass (STAC) so the filesystem write op can read from
+     * user-space buffers. CLAC restores protection afterward.
+     */
+    stac();
+    ssize_t ret = filp->inode->ops->write(filp, buf, count, &filp->offset);
+    clac();
+    return ret;
 }
 
 int vfs_close(struct file *filp) {

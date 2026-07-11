@@ -97,10 +97,12 @@ static inline int strncpy_from_user(char *dst, const char *src, size_t max) {
     if (!user_pages_mapped(src, max)) return -1;
 
     size_t i;
+    stac();
     for (i = 0; i < max - 1; ++i) {
         dst[i] = src[i];
         if (src[i] == '\0') break;
     }
+    clac();
     dst[i] = '\0';
     return (int)(i + 1);
 }

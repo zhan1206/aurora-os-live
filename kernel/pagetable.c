@@ -752,6 +752,50 @@ void pf_handler_c(uint64_t error_code) {
         return;
     }
 
+    /*
+     * SMAP violation: present=1, access was from supervisor (!user),
+     * but the page is a user page (U/S=1 in PTE).
+     * This means kernel code touched a user page without STAC.
+     * Log the error and kill the offending process if in user context,
+     * or panic if in pure kernel context (no current task).
+     */
+    if (present && !user) {
+        /* Verify the page is actually a user page by checking the PTE */
+        uint64_t pml4_idx = (cr2 >> 39) & 0x1FF;
+        uint64_t pdpt_idx = (cr2 >> 30) & 0x1FF;
+        uint64_t pd_idx   = (cr2 >> 21) & 0x1FF;
+        uint64_t pt_idx   = (cr2 >> 12) & 0x1FF;
+
+        uint64_t cr3 = read_cr3();
+        uint64_t *pml4 = phys_to_virt(cr3);
+        if ((pml4[pml4_idx] & PTE_PRESENT) && (pml4[pml4_idx] & PTE_USER)) {
+            uint64_t *pdpt = phys_to_virt(pml4[pml4_idx] & PTE_ADDR_MASK);
+            if ((pdpt[pdpt_idx] & PTE_PRESENT) && (pdpt[pdpt_idx] & PTE_USER)) {
+                uint64_t *pd = phys_to_virt(pdpt[pdpt_idx] & PTE_ADDR_MASK);
+                if ((pd[pd_idx] & PTE_PRESENT) && (pd[pd_idx] & PTE_USER)) {
+                    if (!(pd[pd_idx] & PTE_PS)) {
+                        uint64_t *pt = phys_to_virt(pd[pd_idx] & PTE_ADDR_MASK);
+                        if ((pt[pt_idx] & PTE_PRESENT) && (pt[pt_idx] & PTE_USER)) {
+                            /* SMAP violation confirmed: kernel accessed user page without STAC */
+                            log_printf(LOG_LEVEL_ERR,
+                                "SMAP violation: kernel accessed user page at CR2=%p (code=0x%x)\n",
+                                (void *)cr2, (unsigned int)error_code);
+                            if (current) {
+                                log_printf(LOG_LEVEL_ERR,
+                                    "SMAP violation in process %s (pid=%d), sending SIGSEGV\n",
+                                    current->name, current->pid);
+                                do_sys_kill(current->pid, SIGSEGV);
+                                return;
+                            }
+                            panic("SMAP violation in kernel context at CR2=%p\n", (void *)cr2);
+                        }
+                    }
+                }
+            }
+        }
+        /* Fall through to unhandled if not a SMAP violation */
+    }
+
 unhandled:
     log_printf(LOG_LEVEL_ERR, "Page fault: unhandled at CR2=%p (code=0x%x)\n",
                (void *)cr2, (unsigned int)error_code);

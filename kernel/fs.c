@@ -25,6 +25,7 @@
 #include "block_dev.h"
 #include "procfs.h"
 #include "devtmpfs.h"
+#include "sysfs.h"
 #include "journal.h"
 #include "fsck.h"
 
@@ -124,6 +125,9 @@ void fs_init(void) {
             /* Mount devtmpfs at /dev */
             devtmpfs_init();
 
+            /* Mount sysfs at /sys */
+            sysfs_init();
+
             embed_init();
 
             if (vfs_lookup("/hello")) {
@@ -148,6 +152,9 @@ void fs_init(void) {
 
         /* Mount devtmpfs at /dev */
         devtmpfs_init();
+
+        /* Mount sysfs at /sys */
+        sysfs_init();
 
         embed_init();
 

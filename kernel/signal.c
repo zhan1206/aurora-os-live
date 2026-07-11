@@ -245,6 +245,16 @@ void check_signals(void) {
             return;
         }
 
+        /* Validate the entire trampoline + sigframe region is in valid user memory */
+        size_t frame_total = 8 + TRAMPOLINE_SIZE + sizeof(struct sigframe);
+        if (!user_addr_range_ok((const void *)(uintptr_t)new_rsp, frame_total) ||
+            !user_pages_mapped((const void *)(uintptr_t)new_rsp, frame_total)) {
+            log_printf(LOG_LEVEL_ERR, "signal: user stack region invalid at %p\n",
+                       (void *)(uintptr_t)new_rsp);
+            do_signal_default(s);
+            return;
+        }
+
         /* Write trampoline code at new_rsp + 8.
          * Temporarily disable SMAP via STAC to allow kernel access
          * to user-space stack for signal frame setup. */

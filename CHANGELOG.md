@@ -1,5 +1,26 @@
 # AuroraOS Changelog
 
+## v3.9.4 (2026-07-09) — 四轮复审 SMAP 遗漏修复
+
+### 🔴 严重 (Critical)
+- **I1**: `strncpy_from_user()` 缺少 STAC/CLAC 保护 — 修复前任何带路径的系统调用（open/chdir/execve/unlink/rename/stat 等 11+ 处）在 SMAP 启用后立即触发缺页 panic
+  - 修复：[userspace.h:100-105](kernel/include/userspace.h) 在循环前后添加 `stac()`/`clac()`
+- **I1-cont**: `vfs_read()`/`vfs_write()` 传递用户指针到文件操作层，pipe/ramfs 等直接 `memcpy` 用户内存
+  - 修复：[vfs.c:473-489](kernel/vfs.c) 在调用文件操作前后包裹 `stac()`/`clac()`
+- **I1-cont**: SMAP 缺页（present=1, U/S=0）落入 `unhandled` → `panic()`
+  - 修复：[pagetable.c:755-797](kernel/pagetable.c) 新增 SMAP violation 检测，有进程上下文时发送 SIGSEGV 而非 panic
+
+### 🟡 中 (Medium)
+- signal.c: 用户栈区域（trampoline + sigframe）增加 `user_addr_range_ok` 和 `user_pages_mapped` 校验
+
+### 文档更新
+- 未来规划更新：标记 I1 修复完成，SMAP/SMEP 安全完成
+
+### 版本控制
+- 版本号: v3.9.4
+
+---
+
 ## v3.9.3 (2026-07-09) — 安全加固 + 性能计数器
 
 ### 🔒 安全加固
