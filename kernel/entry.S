@@ -141,12 +141,12 @@ long_mode_start:
     movabs $stack_top, %rsp
 
     /* Zero-extend saved 32-bit values */
-    mov %esi, %esi
-    mov %edi, %edi
+    mov %esi, %esi               /* magic */
+    mov %ebx, %ebx               /* multiboot_info (FIXED: %edi was clobbered in 32-bit code) */
 
     /* Pass arguments to kernel_main */
     mov %rsi, %rdi               /* magic */
-    mov %rdi, %rsi               /* multiboot info */
+    mov %rbx, %rsi               /* multiboot info (FIXED: was %rdi which was overwritten) */
 
     call kernel_main
 

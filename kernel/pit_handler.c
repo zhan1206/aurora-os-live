@@ -16,6 +16,7 @@
  */
 #include "include/log.h"
 #include "sched.h"
+#include "smp.h"
 #include "perf.h"
 #include "rtc.h"
 
@@ -51,7 +52,11 @@ void pit_irq_c_handler(void *rsp) {
         extern int num_cpus;
         for (int cpu = 0; cpu < num_cpus && cpu < MAX_CPUS; cpu++) {
             struct run_queue *rq = &per_cpu_rq[cpu];
-            if (!rq->head || rq->count == 0) continue;
+            spin_lock((spinlock_t*)&rq->lock);  /* FIXED: protect run queue traversal */
+            if (!rq->head || rq->count == 0) {
+                spin_unlock((spinlock_t*)&rq->lock);
+                continue;
+            }
             struct task_struct *t = rq->head;
             int scanned = 0;
             do {
@@ -64,6 +69,7 @@ void pit_irq_c_handler(void *rsp) {
                 t = t->next;
                 scanned++;
             } while (t != rq->head && scanned < rq->count + 1);
+            spin_unlock((spinlock_t*)&rq->lock);  /* FIXED: release run queue lock */
         }
     }
 

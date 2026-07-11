@@ -103,6 +103,9 @@ struct task_struct {
     /* --- Security --- */
     struct seccomp_filter *seccomp;  /* syscall filter (NULL = all allowed) */
 
+    /* --- Child list protection --- */
+    int       child_lock;      /* spinlock for children list (FIX: waitpid race) */
+
     /* --- Performance counters --- */
     uint64_t  syscall_count;   /* total syscalls made by this task */
     uint64_t  page_fault_count; /* total page faults this task */

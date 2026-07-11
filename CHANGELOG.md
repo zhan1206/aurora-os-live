@@ -1,5 +1,33 @@
 # AuroraOS Changelog
 
+## v4.0.2 (2026-07-11) — 关键缺陷修复 (P0-P3)
+
+### 🔴 严重修复 (P0 - Critical)
+- **entry.S 寄存器破坏**: 修复 `long_mode_start` 中 multiboot 参数传递错误
+  - `mov %edi, %edi` → `mov %ebx, %ebx`（%edi 在32位代码中被 clobbered）
+  - `mov %rdi, %rsi` → `mov %rbx, %rsi`（%rdi 已被上一行覆盖为 magic 值）
+  - 影响：此前启动时 magic 和 multiboot_info 均指向 magic，导致内存解析失败
+
+### 🟠 高优先级修复 (P1 - High)
+- **keyboard.c 缓冲区越界**: 循环条件 `i < 31` → `i < 27`，防止 `name[i+4]` 访问超出32字节数组边界
+- **vfs.c 引用计数泄漏**: `vfs_open()` 仅在首次打开时递增 `dentry->refcount`（检查 `refcount==0`），防止同一文件多次打开导致 refcount 永不归零
+- **pit_handler.c 无锁遍历**: 运行队列遍历添加 `spin_lock/spin_unlock` 保护，防止 SMP 并发修改导致 use-after-free
+
+### 🟡 中优先级修复 (P2 - Medium)
+- **pagetable.c PTE 标志**: `split_huge_page()` 和 `map_page()` 保留 NX/Dirty/Accessed 高位标志（已验证已存在）
+- **syscall.c 指针验证**: `sys_readlink`/`sys_mprotect` 添加 `user_addr_range_ok` 检查（已验证已存在）
+- **sched.c waitpid 竞态**: 添加 `child_lock` 自旋锁保护子进程列表操作，防止并发 waitpid 重复回收
+- **vfs.c 挂载点覆盖**: 检查条件从 `existing && existing->inode` 改为 `if (existing)`，拒绝任何已存在 dentry 的重复挂载
+- **gdt.S TSS 延迟初始化**: 预填充 TSS 描述符为有效临时值 (`0x0000890000000067`)，防止启用中断前发生异常导致三倍故障
+
+### 🟢 低优先级修复 (P3 - Low)
+- **mem.c slab_grow 分配检查**: `alloc_page()` 返回值 NULL 检查（已验证已存在）
+
+### 版本控制
+- 版本号: v4.0.2
+
+---
+
 ## v4.0.1 (2026-07-11) — 死代码集成修复 + 测试基础设施重写
 
 ### 🔴 严重修复 (Critical)

@@ -690,6 +690,9 @@ int waitpid(int pid, int *status, int options) {
     if (!current) return -1;
 
     for (;;) {
+        /* FIXED: acquire child_lock to prevent concurrent waitpid races */
+        spin_lock((spinlock_t*)&current->child_lock);
+
         /* Scan children for ZOMBIE */
         struct child_node *prev = NULL;
         struct child_node *node = current->children;
@@ -735,6 +738,8 @@ int waitpid(int pid, int *status, int options) {
                 child->state = TASK_DEAD;
                 kfree(child);
 
+                spin_unlock((spinlock_t*)&current->child_lock);  /* FIXED: unlock before return */
+
                 log_printf(LOG_LEVEL_INFO, "waitpid: collected pid=%d exit_code=%d\n",
                            collected_pid, collected_code);
 
@@ -744,6 +749,8 @@ int waitpid(int pid, int *status, int options) {
             prev = node;
             node = node->next;
         }
+
+        spin_unlock((spinlock_t*)&current->child_lock);  /* FIXED: unlock before block */
 
         /*
          * No ZOMBIE child found.

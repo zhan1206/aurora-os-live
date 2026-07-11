@@ -232,7 +232,7 @@ int vfs_mount(const char *path, struct super_block *sb) {
 
     /* Check if already mounted */
     struct dentry *existing = dentry_lookup_child(root_dentry, mount_name);
-    if (existing && existing->inode) {
+    if (existing) {  /* FIXED: reject any existing dentry, including negative ones */
         log_printf(LOG_LEVEL_WARN, "VFS: mount point '%s' already exists\n", path);
         return -1;
     }
@@ -452,9 +452,9 @@ struct file *vfs_open(const char *path, int flags) {
     }
 
     /* Increment dentry refcount to prevent eviction while this file
-     * is open. Without this, any dentry can be evicted even if files
-     * or cwd reference it. */
-    if (inode->dentry) {
+     * is open. Only increment on first open (refcount==0) to prevent
+     * reference count leak when same file is opened multiple times. */
+    if (inode->dentry && inode->dentry->refcount == 0) {
         inode->dentry->refcount++;
     }
 

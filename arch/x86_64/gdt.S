@@ -53,8 +53,8 @@ gdt_start:
      * Low 8 bytes: set during load_gdt
      * High 8 bytes: set during load_gdt
      */
-    .quad 0  /* TSS low (will be filled) */
-    .quad 0  /* TSS high (will be filled) */
+    .quad 0x0000890000000067  /* TSS low (temporary valid descriptor: P=1, type=9, limit=0x67) */
+    .quad 0x0000000000000000  /* TSS high (base[63:32]=0, filled at runtime) */
 
 gdt_end:
 

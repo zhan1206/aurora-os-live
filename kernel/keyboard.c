@@ -228,7 +228,7 @@ void keyboard_c_handler(void *stack) {
             if (current) {
                 /* Skip if current is the shell (PID 1) */
                 int is_shell = 0;
-                for (int i = 0; current->name[i] && i < 31; i++) {
+                for (int i = 0; current->name[i] && i < 27; i++) {  /* FIXED: prevent name[i+4] OOB */
                     if (current->name[i] == 's' && current->name[i+1] == 'h' &&
                         current->name[i+2] == 'e' && current->name[i+3] == 'l' &&
                         current->name[i+4] == 'l') {
