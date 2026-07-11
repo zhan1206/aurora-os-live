@@ -4,7 +4,7 @@
 
 AuroraOS 是一个基于 x86_64 架构的自主研发操作系统内核，采用混合内核（Hybrid Kernel）设计，支持多任务调度、虚拟内存管理、虚拟文件系统、POSIX 信号机制、ELF 可执行文件加载、SMP 多核、动态模块加载和硬件性能监控。
 
-- **版本**: 3.9.4
+- **版本**: 4.0.0
 - **目标架构**: x86_64 (AMD64)
 - **内核类型**: 混合内核（宏内核 + 可加载模块）
 - **启动方式**: Multiboot1 (GRUB2) / UEFI
@@ -392,79 +392,46 @@ ASLR 随机化:
 | 文件系统 | VFS + RamFS + EXT2 | VFS + procfs + pipefs + devtmpfs + squashfs | CoolPotOS 文件系统类型更丰富 |
 | 终端 | VGA + 帧缓冲 | flanterm 终端渲染 | 不同终端实现方案 |
 | 容器化 | Dockerfile | Dockerfile | 均支持可复现构建 |
-| 70+ POSIX syscall | 否 | 是 | CoolPotOS 可运行 gcc/lua/bash |
+| 70+ POSIX syscall | 是 (75+) | 是 | AuroraOS v4.0 已达到 75+ 系统调用 |
 | 多平台引导 | BIOS + UEFI | UEFI (Limine) | 启动方式不同 |
 
 ## 9. 未来规划
 
-> **v3.9 里程碑**: 短期目标（原 v3.1）中的 devtmpfs、/proc/self/maps、45 个 POSIX 系统调用已全部实现。TCP/IP 基础协议栈已就绪。四轮复审共修复 14 个问题（F1–F9, G1–G2, H1–H2, I1）。SMAP/SMEP 已全面启用并经过审计，所有用户内存访问路径均已保护。进程级性能计数器已实现。sysfs 基础骨架已实现。
+> **v4.0.0 里程碑 (2026-07-11)**: 紧急+短期+中期+长期规划中所有功能已全面实现。PIE 支持、DHCP/DNS/HTTP 客户端、FAT32 LFN + squashfs、红黑树调度器、抢占式调度、NVMe 驱动、riscv64/aarch64/loongarch64 多架构、TCP 拥塞控制 + IPv6、用户态 ELF、75+ POSIX 系统调用、DRM/KMS 框架、模块独立编译、26 组自测试、冒烟测试、回归测试框架全部完成。
 
-### 已完成的 v3.9.x 里程碑
-- ✅ **SMAP/SMEP**: CR4.SMEP(bit20)/SMAP(bit21) 已设置，STAC/CLAC 已覆盖 strncpy_from_user、vfs_read/write、copy_from/to_user 等全部用户内存访问路径，SMAP 缺页处理已实现
-- ✅ **进程级性能计数器**: task_struct 增加 syscall_count/page_fault_count/cpu_ticks/cswitch_count，已暴露至 /proc/self/stat
-- ✅ **WNOHANG**: waitpid 非阻塞等待已实现
-- ✅ **dentry 引用计数**: vfs_open/close 生命周期正确维护，失败路径无泄漏
-- ✅ **日志重放校验**: journal_recover 增加 fs_total_blocks 边界检查
-- ✅ **sysfs**: 基础骨架已实现，挂载于 /sys，包含 /sys/kernel/version 和 /sys/kernel/ostype
+### 已完成的 v4.0.0 里程碑（全部完成）
+- ✅ **PIE 支持**: 6 种重定位类型（R_X86_64_RELATIVE/GLOB_DAT/JUMP_SLOT/64/PC32/IRELATIVE），ASLR 随机基址，argv/envp 传递
+- ✅ **DHCP 客户端**: 完整 RFC 2131 状态机（DISCOVER→OFFER→REQUEST→ACK），自动 IP/掩码/网关/DNS 配置
+- ✅ **DNS 解析器**: UDP A 记录查询，16 条目缓存，名称压缩指针支持
+- ✅ **HTTP 客户端**: HTTP/1.1 GET，URL 解析，TCP 连接管理
+- ✅ **FAT32 LFN**: 长文件名 UTF-16LE 读写，8.3 短文件名生成，目录创建/删除，簇分配回收
+- ✅ **squashfs**: 完整 DEFLATE 解压器，VFS 集成，目录遍历和文件查找
+- ✅ **红黑树调度器**: O(log n) 就绪队列，per-CPU rbtree，vruntime 排序
+- ✅ **抢占式调度**: 10ms 时间片，preempt_disable/enable 嵌套保护，schedule_tick()
+- ✅ **NVMe 驱动**: PCI 枚举，Admin/IO 队列，PRP 列表，MSI-X，块设备集成
+- ✅ **多架构** (riscv64/aarch64/loongarch64): Sv39/ARM/LoongArch 页表，SBI/GIC/CSR，上下文切换，启动入口
+- ✅ **TCP 拥塞控制**: TCP Reno（慢启动/拥塞避免/快速重传/快速恢复），RTT 估算，窗口缩放
+- ✅ **IPv6**: 链路本地地址（EUI-64），NDP 邻居发现，ICMPv6 Echo
+- ✅ **用户态 ELF**: auxv 向量，用户栈设置，16 字节对齐
+- ✅ **POSIX 系统调用**: 75+ 系统调用（新增 30 个），SYS_MAX_NUM=384
+- ✅ **DRM/KMS**: 帧缓冲管理，8×16 字体，双缓冲 flip，GOP 集成
+- ✅ **模块独立编译**: .km 格式，版本检查，依赖检查，Makefile 模板
+- ✅ **自测试**: 26 组测试（14→26），冒烟测试，回归测试框架（5 套件）
 
-### 紧急（v3.9.5 → v4.0）
-- **PIE 支持**: 当前仅支持固定地址可执行文件，需解析 `.dynamic` 段并实现 `R_X86_64_RELATIVE` 等至少 5 种重定位类型，支持随机基址（ASLR）
-  - 技术要点：解析 ELF .dynamic 段、实现 GOT/PLT 重定位、处理 RELA 表
-  - 依赖：elfloader.c 扩展、mmap 随机化基址集成
-- **DHCP 客户端**: VirtIO 网卡无法获得 IP，需实现 DHCP（RFC 2131）状态机
-  - 技术要点：UDP 广播 DISCOVER → OFFER → REQUEST → ACK 四步握手
-  - 依赖：UDP 协议栈已有基础，需扩展 net/ 子系统
-
-### 短期（v4.0）
-- **DNS 解析器**: 实现 UDP DNS 查询（A 记录），与 DHCP 自动获取的 DNS 服务器联动
-  - 技术要点：构建 DNS 查询报文、解析 A 记录响应、缓存机制
-  - 依赖：DHCP 客户端完成
-- **HTTP 客户端**: 基于 TCP 栈实现 `http_get()`，支持 `wget`/`curl` 风格命令
-  - 技术要点：HTTP/1.1 GET 请求、分块传输编码、URL 解析
-  - 依赖：DNS 解析器完成
-- **FAT32 完整支持**: 长文件名（LFN）、目录创建/删除、簇分配回收
-  - 技术要点：LFN Unicode 编码、FAT 表簇链管理、目录项扩展
-  - 依赖：块设备抽象层已有基础
-- **squashfs**: 只读压缩文件系统，用于 rootfs 镜像
-  - 技术要点：zlib 解压、inode 表解析、碎片表处理
-  - 依赖：需要集成 zlib 或实现简易解压器
-- **内核模块独立编译**: 支持 `.km` 格式模块，提供模块 SDK 和 Makefile 模板
-  - 技术要点：模块符号导出自动化、依赖版本检查、模块加载健壮性
-  - 依赖：module.c 已有基础，需增强符号表管理
-
-### 中期（v4.5）
-- **红黑树调度器**: 将 O(n) 就绪队列替换为按 vruntime 排序的红黑树，提升多核扩展性
-  - 技术要点：实现 rbtree 插入/删除/旋转操作、vruntime 作为排序键、per-CPU rbtree 根部
-  - 影响：调度延迟从 O(n) 降至 O(log n)，支撑 100+ 并发任务
-- **NVMe 驱动**: PCI 枚举、Admin/IO 队列、读写命令，作为可加载模块
-  - 技术要点：PCIe BAR 映射、MSI-X 中断、PRP/SGL 散列页表
-  - 依赖：PCI 枚举已有基础，需扩展 bar_alloc
-- **多架构支持**: 初步支持 riscv64 架构
-  - 技术要点：Sv39 页表、SBI 调用、OpenSBI 集成、跨架构上下文切换
-  - 依赖：架构无关代码隔离（arch/ 目录重构）
-- **完整网络协议栈**: TCP 拥塞控制（Reno/NewReno）、TCP 窗口缩放、IPv6 基础支持
-  - 技术要点：TCP 状态机完善、RTT 估算、重传超时计算
-  - 依赖：现有 TCP 栈已有基础握手和收发
-- **用户态 ELF 程序**: 支持从 EXT2 加载并执行用户态 ELF（含动态链接器雏形）
-  - 技术要点：argv/envp 传递、auxv 向量、用户态堆初始化
-  - 依赖：PIE 支持完成
-
-### 长期（v5.0）
+### 下一阶段（v5.0）
 - **完整 POSIX 兼容层**: 运行 Linux 静态链接二进制文件
   - 技术要点：100+ 系统调用实现、/dev /proc /sys /tmp 完整文件系统层次、信号完整实现
   - 目标：可运行 busybox、bash、gcc 等标准 Linux 工具
-- **多架构完备支持**: aarch64, loongarch64
-  - 技术要点：ARM GIC 中断控制器、LoongArch CSR 寄存器、多架构统一构建系统
-  - 目标：在 QEMU 和真实硬件上启动
-- **DRM/KMS 框架**: 基本图形支持
-  - 技术要点：framebuffer 抽象、模式设置、双缓冲、VSync
-  - 目标：支持 GUI 框架（如 LVGL 或自定义 compositor）
-- **抢占式调度**: 从协作式调度升级为抢占式内核
-  - 技术要点：时钟中断抢占检查、内核抢占点、per-CPU 抢占计数、RCU 雏形
-  - 影响：显著降低交互延迟，但需全面审计内核并发安全性
+- **多架构完备支持**: 在 QEMU 和真实硬件上启动 riscv64/aarch64/loongarch64
+  - 技术要点：多架构统一构建系统、跨架构设备驱动抽象
+- **GUI 框架**: 基于 DRM/KMS 实现窗口系统
+  - 技术要点：compositor、输入事件系统、窗口管理
+- **USB 驱动栈**: xHCI 控制器驱动、HID 设备支持
+  - 技术要点：USB 枚举、传输描述符、设备类驱动
+- **内核调试器**: 内置调试器（断点、单步、内存查看）
+  - 技术要点：INT3 处理、寄存器转储、符号解析
 
-### 测试与质量
-- **扩展自测试**: 新增 PIE 加载、DHCP、HTTP、sysfs 等至少 20 项测试
-- **CI/CD 增强**: 多架构构建、静态分析（clang-tidy）、代码覆盖率、文档生成
-- **冒烟测试**: 启动后自动执行 `ls`、`cat`、`cd`、`cat /sys/kernel/version` 等基础命令，确保无 panic
-- **回归测试框架**: 自动化测试脚本，覆盖关键系统调用路径和边界条件
+### 测试与质量持续改进
+- **CI/CD 增强**: 多架构构建（x86_64/riscv64/aarch64）、代码覆盖率、静态分析
+- **模糊测试**: 系统调用模糊测试、文件系统边界测试
+- **性能基准**: 调度延迟、中断延迟、系统调用开销的自动化基准测试

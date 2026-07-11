@@ -68,23 +68,11 @@ void pit_irq_c_handler(void *rsp) {
     }
 
     /* === Preemptive Scheduling: Time Slice Accounting ===
-     * Decrement the current task's time_slice each tick.
-     * When time_slice reaches 0, set need_resched to trigger
-     * preemption at the next safe point (iretq return).
-     * The scheduler will update vruntime based on the consumed slice.
+     * Delegates to schedule_tick() in sched.c which decrements
+     * the current task's time_slice and sets need_resched when
+     * the time slice is exhausted.
      */
-    if (current && current->state == TASK_RUNNING) {
-        if (current->time_slice > 0) {
-            current->time_slice--;
-        }
-        if (current->time_slice <= 0) {
-            /* Time slice exhausted — mark for preemption */
-            __sync_lock_test_and_set(&need_resched, 1);
-            /* Recharge time slice for next run */
-            current->time_slice = BASE_SLICE * (256 - current->priority) / 256;
-            if (current->time_slice < 1) current->time_slice = 1;
-        }
-    }
+    schedule_tick();
 
     /* Set flag instead of calling schedule() directly.
      * The interrupted code will check need_resched at its next

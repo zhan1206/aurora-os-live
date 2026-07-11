@@ -23,6 +23,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #include "types.h"
+#include "rbtree.h"
 
 #define MAX_FDS 16
 
@@ -72,11 +73,14 @@ struct task_struct {
     struct task_struct  *sibling_next;   /* next sibling */
 
     /* --- Scheduling --- */
-    struct task_struct *next;  /* ready queue link (circular) */
+    struct task_struct *next;  /* ready queue link (circular, kept for compatibility) */
+    struct rb_node    rb_node; /* red-black tree node for vruntime-ordered ready queue */
     int       priority;        /* scheduling priority (0=lowest, 255=highest) */
     int       time_slice;      /* remaining ticks in current time slice */
     int       cpu_mask;        /* allowed CPU mask (bitmap, for SMP) */
     uint64_t  vruntime;        /* virtual runtime for CFS/EEVDF fair scheduling */
+    int       need_resched;    /* set to 1 when this task should be preempted */
+    int       preempt_count;   /* preemption disable count (>0 = preemption disabled) */
 
     /* --- Fork state --- */
     int       is_fork_child;   /* 1 if this task is a fresh fork child (returns 0) */
@@ -116,6 +120,7 @@ struct task_struct {
 
 struct run_queue {
     struct task_struct *head;  /* circular linked list of ready tasks */
+    struct rb_root ready_tree; /* red-black tree for O(log n) vruntime-ordered scheduling */
     int count;                 /* number of tasks in queue */
     int lock;                  /* simple spin flag (protected by interrupt disable) */
 };
@@ -127,6 +132,21 @@ struct task_struct *create_task(void (*fn)(void));
 void schedule(void);
 void yield(void);
 void check_resched(void);
+
+/*
+ * schedule_tick: Called from the timer interrupt (PIT/APIC) on each tick.
+ * Decrements the current task's time_slice and sets need_resched when
+ * the time slice is exhausted. This implements preemptive scheduling.
+ */
+void schedule_tick(void);
+
+/*
+ * preempt_disable / preempt_enable: Control preemption nesting.
+ * When preempt_count > 0, the current task cannot be preempted.
+ * preempt_enable() checks need_resched and calls schedule() if needed.
+ */
+void preempt_disable(void);
+void preempt_enable(void);
 
 /*
  * smp_schedule: Load-balance tasks across CPUs.

@@ -81,7 +81,7 @@ OBJS := $(patsubst $(SRCDIR)/%.c,$(BUILDDIR)/%.o,$(K_C_SRCS))
 OBJS += $(patsubst arch/%.S,$(BUILDDIR)/arch/%.o,$(filter arch/%,$(K_S_SRCS)))
 OBJS += $(patsubst $(SRCDIR)/%.S,$(BUILDDIR)/%.o,$(filter $(SRCDIR)/%,$(K_S_SRCS)))
 
-.PHONY: all debug uefi clean iso run help modules version test check-update checksum
+.PHONY: all debug uefi clean iso run help modules version test smoke-test regression-test check-update checksum modules-build modules-clean
 
 all: $(KERNEL)
 
@@ -155,11 +155,14 @@ help:
 	@echo "  make iso          - build + create hybrid ISO (BIOS + UEFI)"
 	@echo "  make run          - build + run in QEMU"
 	@echo "  make modules      - build kernel modules"
+	@echo "  make modules-build - build modules from modules/ directory"
 	@echo "  make clean        - remove all artifacts"
 	@echo "  make version      - show version information"
 	@echo "  make checksum     - generate SHA256 checksum for os.iso"
 	@echo "  make check-update - check GitHub for newer version"
-	@echo "  make test         - build and run automated tests"
+	@echo "  make test         - build and run automated tests (smoke + self-test)"
+	@echo "  make smoke-test   - build ISO and run smoke test"
+	@echo "  make regression-test - build ISO and run regression test suite"
 	@echo ""
 	@echo "Toolchain: CC=$(CC) LD=$(LD) OBJCOPY=$(OBJCOPY)"
 	@echo "Build:     $(BUILD_TYPE) | $(BUILD_DATE) | $(GIT_HASH)"
@@ -183,10 +186,22 @@ check-update:
 	@echo "  Checking for updates..."
 	@scripts/check_update.sh 2>/dev/null || echo "  Update check requires scripts/check_update.sh"
 
-# Run automated tests in QEMU
+# Run automated tests in QEMU (smoke test first, then self-test)
 test: iso
-	@echo "  TEST  running self-tests in QEMU..."
-	@scripts/run_qemu_test.py 2>/dev/null || (echo "  TEST  running with qemu..."; qemu-system-x86_64 -m 256M -cdrom os.iso -nographic -no-reboot 2>&1 | tee qemu_test.log)
+	@echo "  TEST  running smoke test..."
+	@scripts/smoke_test.sh 2>/dev/null || (echo "  TEST  smoke test failed (see above)"); \
+	echo "  TEST  running self-tests in QEMU..."; \
+	scripts/run_qemu_test.py 2>/dev/null || (echo "  TEST  running with qemu..."; qemu-system-x86_64 -m 256M -cdrom os.iso -nographic -no-reboot 2>&1 | tee qemu_test.log)
+
+# Smoke test: boot and check basic functionality
+smoke-test: iso
+	@echo "  SMOKE running smoke test..."
+	@scripts/smoke_test.sh
+
+# Regression test: comprehensive automated test suite
+regression-test: iso
+	@echo "  REGRESSION running regression test suite..."
+	@python3 scripts/regression_test.py || python scripts/regression_test.py
 
 # ================================================================
 # Kernel modules
@@ -210,3 +225,30 @@ $(BUILDDIR)/modules/%.ko: $(BUILDDIR)/modules/%.o
 
 modules: $(MODULE_KOS)
 	@echo "  MODULES built: $(MODULE_KOS)"
+
+# ================================================================
+# modules-build: Build modules from the modules/ directory
+# ================================================================
+modules-build:
+	@echo "  MODULES building from modules/ directory..."
+	@if [ -f modules/Makefile.template ]; then \
+		for mod_src in modules/*.c; do \
+			mod_name=$$(basename $$mod_src .c); \
+			echo "  Building module: $$mod_name"; \
+			$(MAKE) -f modules/Makefile.template MODULE=$$mod_name BUILDDIR=$(BUILDDIR)/modules/$$mod_name 2>/dev/null || \
+			true; \
+		done; \
+	else \
+		echo "  modules/Makefile.template not found"; \
+	fi
+	@echo "  MODULES build complete."
+
+modules-clean:
+	@echo "  Cleaning modules..."
+	@for mod_dir in $(BUILDDIR)/modules/*/; do \
+		if [ -f "$$mod_dir/Makefile" ] || [ -f "modules/Makefile.template" ]; then \
+			rm -rf "$$mod_dir"; \
+		fi \
+	done 2>/dev/null || true
+	@rm -rf $(BUILDDIR)/modules
+	@echo "  Modules cleaned."

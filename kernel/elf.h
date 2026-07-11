@@ -102,13 +102,57 @@ typedef struct {
 #define R_X86_64_32S       11
 #define R_X86_64_RELATIVE  8
 
+/* --- ELF file types --- */
+#define ET_NONE  0
+#define ET_REL   1
+#define ET_EXEC  2
+#define ET_DYN   3
+
 /* --- Program header types --- */
-#define PT_NULL 0
-#define PT_LOAD 1
+#define PT_NULL      0
+#define PT_LOAD      1
+#define PT_DYNAMIC   2
+#define PT_GNU_RELRO 0x6474e552
 
 /* Program header p_flags */
 #define PF_X 1
 #define PF_W 2
 #define PF_R 4
+
+/* --- .dynamic section entry --- */
+typedef struct {
+    int64_t  d_tag;
+    uint64_t d_val;
+} Elf64_Dyn;
+
+/* Dynamic tags */
+#define DT_NULL     0
+#define DT_NEEDED   1
+#define DT_SYMTAB   6
+#define DT_RELA     7
+#define DT_RELASZ   8
+#define DT_RELAENT  9
+#define DT_STRTAB   5
+#define DT_REL      17
+#define DT_RELSZ    18
+#define DT_RELENT   19
+
+/* --- x86_64 relocation types (additional) --- */
+#define R_X86_64_GLOB_DAT   6
+#define R_X86_64_JUMP_SLOT  7
+#define R_X86_64_IRELATIVE  37
+
+/* --- Auxiliary vector types --- */
+#define AT_NULL    0
+#define AT_PHDR    3
+#define AT_PHENT   4
+#define AT_PHNUM   5
+#define AT_PAGESZ  6
+#define AT_ENTRY   9
+
+typedef struct {
+    uint64_t a_type;
+    uint64_t a_val;
+} Elf64_auxv_t;
 
 #endif

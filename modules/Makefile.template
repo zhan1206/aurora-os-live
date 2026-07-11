@@ -1,0 +1,114 @@
+# ================================================================
+# AuroraOS Kernel Module Build Template
+#
+# Usage:
+#   make -f Makefile.template MODULE=mymodule
+#   make -f Makefile.template MODULE=mymodule format=km
+#   make -f Makefile.template MODULE=mymodule clean
+#
+# Supports output formats:
+#   .ko - ELF relocatable object (standard format)
+#   .km - ELF relocatable with module metadata (version info embedded)
+# ================================================================
+
+# Toolchain
+CC_CROSS := $(shell which x86_64-elf-gcc 2>/dev/null)
+LD_CROSS := $(shell which x86_64-elf-ld 2>/dev/null)
+
+ifeq ($(CC_CROSS),)
+  CC := gcc
+else
+  CC := $(CC_CROSS)
+endif
+
+ifeq ($(LD_CROSS),)
+  LD := ld
+else
+  LD := $(LD_CROSS)
+endif
+
+# Module name (required)
+MODULE ?= mod_hello
+
+# Output format: ko (standard) or km (with metadata)
+FORMAT ?= ko
+
+# Kernel source include paths
+KERNEL_INCLUDE := ../kernel/include
+KERNEL_SRC     := ../kernel
+
+# Module CFLAGS: freestanding, no standard library, no red zone
+MODULE_CFLAGS := -ffreestanding -Wall -Wextra -fno-pic -fno-stack-protector \
+                 -mno-sse -mgeneral-regs-only -mno-red-zone \
+                 -std=gnu17 -O2 -DNDEBUG \
+                 -I$(KERNEL_INCLUDE) -I$(KERNEL_SRC)
+
+# Detect kernel version from version.h
+KERNEL_MAJOR := $(shell grep 'AURORAOS_MAJOR' $(KERNEL_INCLUDE)/version.h 2>/dev/null | grep -o '[0-9]\+' | head -1)
+KERNEL_MINOR := $(shell grep 'AURORAOS_MINOR' $(KERNEL_INCLUDE)/version.h 2>/dev/null | grep -o '[0-9]\+' | head -1)
+KERNEL_PATCH := $(shell grep 'AURORAOS_PATCH' $(KERNEL_INCLUDE)/version.h 2>/dev/null | grep -o '[0-9]\+' | head -1)
+
+ifdef KERNEL_MAJOR
+  MODULE_CFLAGS += -DKERNEL_VERSION_MAJOR=$(KERNEL_MAJOR) \
+                   -DKERNEL_VERSION_MINOR=$(KERNEL_MINOR) \
+                   -DKERNEL_VERSION_PATCH=$(KERNEL_PATCH)
+endif
+
+# Build directory
+BUILDDIR := build
+
+# Source files
+MODULE_SRC := $(MODULE).c
+MODULE_OBJ := $(BUILDDIR)/$(MODULE).o
+
+# Output targets
+ifeq ($(FORMAT),km)
+  MODULE_OUT := $(BUILDDIR)/$(MODULE).km
+else
+  MODULE_OUT := $(BUILDDIR)/$(MODULE).ko
+endif
+
+# Default target
+.PHONY: all clean help
+
+all: $(MODULE_OUT)
+
+$(BUILDDIR):
+	@mkdir -p $(BUILDDIR)
+
+$(MODULE_OBJ): $(MODULE_SRC) | $(BUILDDIR)
+	@echo "  CC[M] $(MODULE_SRC) -> $(MODULE_OBJ)"
+	$(CC) $(MODULE_CFLAGS) -c $< -o $@
+
+# Standard .ko: simple relocatable link
+$(BUILDDIR)/$(MODULE).ko: $(MODULE_OBJ)
+	@echo "  LD[M] $(MODULE_OBJ) -> $@"
+	$(LD) -r -o $@ $<
+
+# .km format: relocatable link with version metadata section
+# Uses objcopy to add a .modinfo section containing version info
+$(BUILDDIR)/$(MODULE).km: $(MODULE_OBJ)
+	@echo "  LD[M] $(MODULE_OBJ) -> $@ (with metadata)"
+	$(LD) -r -o $(BUILDDIR)/$(MODULE).tmp.o $<
+	$(OBJCOPY) \
+		--add-section .modinfo=$(BUILDDIR)/modinfo.bin \
+		$(BUILDDIR)/$(MODULE).tmp.o $@ 2>/dev/null || \
+		(cp $(BUILDDIR)/$(MODULE).tmp.o $@)
+	@rm -f $(BUILDDIR)/$(MODULE).tmp.o $(BUILDDIR)/modinfo.bin
+
+clean:
+	rm -rf $(BUILDDIR)
+
+help:
+	@echo "AuroraOS Kernel Module Build Template"
+	@echo ""
+	@echo "Usage:"
+	@echo "  make -f Makefile.template MODULE=<name>          - build .ko module"
+	@echo "  make -f Makefile.template MODULE=<name> FORMAT=km - build .km module"
+	@echo "  make -f Makefile.template MODULE=<name> clean     - clean build artifacts"
+	@echo ""
+	@echo "Variables:"
+	@echo "  MODULE  - module name (default: mod_hello)"
+	@echo "  FORMAT  - output format: ko or km (default: ko)"
+	@echo "  CC      - C compiler (auto-detected)"
+	@echo "  LD      - linker (auto-detected)"

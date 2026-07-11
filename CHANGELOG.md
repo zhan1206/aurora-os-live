@@ -1,5 +1,113 @@
 # AuroraOS Changelog
 
+## v4.0.0 (2026-07-11) — 重大功能更新：紧急+短期+中期+长期规划全面实现
+
+### 🚀 新增功能 (New Features)
+
+#### 可执行文件与进程
+- **PIE 支持**: 解析 `.dynamic` 段，实现 `R_X86_64_RELATIVE`、`R_X86_64_GLOB_DAT`、`R_X86_64_JUMP_SLOT`、`R_X86_64_64`、`R_X86_64_PC32`、`R_X86_64_IRELATIVE` 共 6 种重定位类型
+  - 新增 `elf_load_pie()` 函数，支持 argv/envp 参数传递
+  - PIE 基址从 ASLR 获取随机偏移，回退基址 `0x555555554000`
+- **用户态 ELF 程序**: 用户态栈设置（argv/envp/auxv 向量），16 字节对齐的栈布局
+  - 实现 auxv 向量（AT_PHDR, AT_PHENT, AT_PHNUM, AT_ENTRY, AT_PAGESZ）
+
+#### 网络协议栈
+- **DHCP 客户端**: 完整 RFC 2131 状态机（DISCOVER → OFFER → REQUEST → ACK）
+  - 自动配置 IP 地址、子网掩码、网关、DNS 服务器
+  - 文件: `kernel/net/dhcp.c`
+- **DNS 解析器**: UDP DNS A 记录查询，支持名称压缩指针
+  - 16 条目 DNS 缓存（djb2 哈希）
+  - 默认 DNS 服务器: 8.8.8.8
+  - 文件: `kernel/net/dns.c`
+- **HTTP 客户端**: HTTP/1.1 GET 请求，URL 解析（hostname/port/path）
+  - 支持 `wget`/`curl` 风格命令
+  - 文件: `kernel/net/http.c`
+- **TCP 拥塞控制**: TCP Reno 算法（慢启动、拥塞避免、快速重传、快速恢复）
+  - RTT 估算（RFC 6298）、Karn 算法、RTO 指数退避
+  - TCP 窗口缩放（RFC 1323）
+  - 文件: `kernel/net/tcp_cong.c`
+- **IPv6 基础框架**: 链路本地地址生成（EUI-64）、NDP 邻居发现协议
+  - ICMPv6 Echo 回复、邻居缓存（16 条目 LRU）
+  - 文件: `kernel/net/ipv6.c`
+
+#### 文件系统
+- **FAT32 长文件名 (LFN)**: UTF-16LE 编码 LFN 条目读写、8.3 短文件名生成
+  - LFN 校验和计算、目录创建/删除（`fat32_mkdir`/`fat32_rmdir`）
+  - 簇分配回收（`fat32_alloc_cluster`/`fat32_free_cluster_chain`）
+- **squashfs**: 只读压缩文件系统，完整 DEFLATE 解压器（zlib 兼容）
+  - 支持压缩/未压缩数据块、元数据块、目录遍历、文件查找
+  - 集成到 VFS 层
+  - 文件: `kernel/squashfs.c`, `kernel/squashfs.h`
+
+#### 调度器
+- **红黑树调度器**: 将 O(n) 就绪队列替换为 O(log n) 红黑树（按 vruntime 排序）
+  - 实现 rb_insert/rb_erase/rb_find_min/rb_next 等完整操作
+  - per-CPU rbtree 根节点，支持 SMP 工作窃取
+  - 文件: `kernel/rbtree.c`, `kernel/rbtree.h`
+- **抢占式调度**: 时间片抢占（默认 10ms）、preempt_disable/enable 嵌套控制
+  - schedule_tick() 在 PIT 中断中调用，check_resched() 在系统调用返回时检查
+  - 内核抢占点保护（preempt_count > 0 时禁止抢占）
+
+#### 设备驱动
+- **NVMe 驱动**: PCI 枚举、Admin/IO 提交队列和完成队列
+  - IDENTIFY 命令获取控制器和命名空间信息
+  - PRP 列表读写、MSI-X 中断支持
+  - 集成到块设备抽象层
+  - 文件: `kernel/nvme.c`, `kernel/nvme.h`
+
+#### 多架构支持
+- **riscv64**: Sv39 页表、SBI 调用接口、上下文切换、启动入口
+  - 文件: `arch/riscv64/boot.S`, `context.S`, `pagetable.h`, `sbi.h`
+- **aarch64**: ARM 页表（TTBR0/TTBR1）、GIC 中断控制器、上下文切换
+  - 文件: `arch/aarch64/boot.S`, `context.S`, `gic.h`, `pagetable.h`
+- **loongarch64**: CSR 寄存器定义、TLB 操作、启动入口
+  - 文件: `arch/loongarch64/boot.S`, `context.S`, `csr.h`
+- **架构抽象层**: `arch.h` 提供统一接口（mfence/halt/irq/cache_flush）
+  - 文件: `kernel/include/arch.h`
+
+#### POSIX 兼容层
+- 新增 **30 个系统调用**: getcwd, chmod, access, fchmod, fchown, lseek, ftruncate, fsync, readlink, symlink, getppid, getuid/euid/gid/egid, setuid/gid, getpgid/setpgid, setsid, nice, brk, sbrk, mprotect, madvise, gettimeofday, clock_gettime, nanosleep, dup2, pipe2, poll, fcntl, sysinfo, getrlimit/setrlimit, sched_yield, getrandom
+  - 系统调用总数: 45 → 75+，SYS_MAX_NUM: 128 → 384
+
+#### DRM/KMS 框架
+- 帧缓冲管理（创建/销毁/填充矩形/绘制字符）
+- 内置 8×16 位图字体（95 个 ASCII 字形）
+- 双缓冲 flip、模式设置、连接器检测
+- 集成 UEFI GOP 帧缓冲或 VGA 回退
+- 文件: `kernel/drm.c`, `kernel/drm.h`
+
+#### 模块系统
+- **模块独立编译**: `.km` 格式（带版本元数据）、`.ko` 格式兼容
+  - 模块 SDK 和 Makefile 模板（`modules/Makefile.template`）
+  - 模块版本检查（`module_version_check`）、依赖检查（`module_dep_check`）
+  - 示例模块: `modules/mod_hello.c`
+
+#### 测试与质量
+- **自测试扩展**: 14 → 26 组（新增 PIE/DHCP/DNS/HTTP/FAT32-LFN/红黑树/抢占/sysfs/模块 测试）
+- **冒烟测试**: `scripts/smoke_test.sh` 启动后自动执行基础命令验证
+- **回归测试框架**: `scripts/regression_test.py` 5 套测试套件，JSON 报告输出
+- **Makefile 新目标**: `make smoke-test`, `make regression-test`, `make modules-build`
+
+### 🔧 优化内容
+- 调度器: O(n) 链表扫描 → O(log n) 红黑树查找，100+ 并发任务扩展性
+- TCP: 从基础握手扩展到完整 Reno 拥塞控制 + RTT 估算
+- 系统调用: 从 45 个扩展到 75+ 个，接近 POSIX 基础兼容
+
+### 🐛 缺陷修复
+- 红黑树删除修复: NULL 节点解引用问题（使用 x_is_left 标志位）
+- 抢占嵌套计数: 临界区保护（preempt_count > 0 时禁止抢占）
+
+### ⚠️ 兼容性变更
+- **版本号**: v3.9.4 → v4.0.0 (MAJOR 版本升级，新增大量功能)
+- 系统调用号: 新增 30 个系统调用，与 Linux x86_64 ABI 对齐
+- 调度器: 就绪队列从链表改为红黑树，接口向后兼容
+- 模块格式: 新增 `.km` 格式，`.ko` 格式保持兼容
+
+### 版本控制
+- 版本号: v4.0.0
+
+---
+
 ## v3.9.4 (2026-07-09) — 四轮复审 SMAP 遗漏修复
 
 ### 🔴 严重 (Critical)

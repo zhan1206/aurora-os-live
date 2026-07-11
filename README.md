@@ -3,8 +3,8 @@
 [![CI Build](https://github.com/zhan1206/aurora-os/actions/workflows/build.yml/badge.svg)](https://github.com/zhan1206/aurora-os/actions/workflows/build.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Lines of Code](https://img.shields.io/badge/code-~26,500%20lines-blue)](kernel/)
-[![Self Tests](https://img.shields.io/badge/tests-14/14-brightgreen)](kernel/selftest.c)
-[![Version](https://img.shields.io/badge/version-v3.9.4-blue)](CHANGELOG.md)
+[![Self Tests](https://img.shields.io/badge/tests-26/26-brightgreen)](kernel/selftest.c)
+[![Version](https://img.shields.io/badge/version-v4.0.0-blue)](CHANGELOG.md)
 
 **100% 自研代码** | 无 Linux 内核代码 | 无第三方内核组件
 

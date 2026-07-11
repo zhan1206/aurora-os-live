@@ -31,6 +31,7 @@
 #include "module.h"
 #include "rtc.h"
 #include "cmdline.h"
+#include "drm.h"
 #include "../boot/boot_info.h"
 
 /* ================================================================
@@ -161,6 +162,15 @@ void kernel_main(uint32_t magic, void *mb_info) {
     }
     console_clear();
     console_hide_cursor();
+
+    /* Initialize DRM/KMS with UEFI GOP framebuffer if available */
+    if (is_uefi && uefi_bi->fb_valid) {
+        drm_init_gop((void *)(uintptr_t)uefi_bi->fb_addr,
+                     uefi_bi->fb_width, uefi_bi->fb_height,
+                     uefi_bi->fb_pitch, uefi_bi->fb_bpp);
+    } else {
+        drm_init();
+    }
 
     /* Center logo vertically: 5 logo + 2 subtitle + 1 top-pad + 1 top-sep + 3 version + 1 bot-pad + 1 bot-sep = 15 */
     console_vcenter(15);

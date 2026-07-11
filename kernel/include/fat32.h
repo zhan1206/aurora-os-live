@@ -18,6 +18,8 @@
 #define ATTR_DIRECTORY  0x10
 #define ATTR_ARCHIVE    0x20
 #define ATTR_LFN        0x0F  /* LFN entry: combination of READ_ONLY|HIDDEN|SYSTEM|VOLUME_ID */
+#define FAT32_ATTR_LFN  0x0F  /* Alias for ATTR_LFN */
+#define FAT32_LFN_LAST  0x40  /* LFN sequence number: last entry flag */
 
 /* ================================================================
  * FAT32 cluster constants
@@ -166,5 +168,98 @@ struct file;
  * Returns a super_block on success, or NULL on failure.
  */
 struct super_block *fat32_mount(struct block_device *bdev);
+
+/* ================================================================
+ * LFN (Long File Name) API
+ * ================================================================ */
+
+/*
+ * fat32_read_lfn: Read a long file name from LFN entries.
+ * Given an array of LFN entries (in reverse order), produce a null-terminated
+ * ASCII string. Returns the length of the name, or 0 on failure.
+ */
+int fat32_read_lfn(const struct fat32_lfn_entry *lfn_entries, int num_entries,
+                   char *out, int out_max);
+
+/*
+ * fat32_write_lfn: Build LFN entries + 8.3 short name entry for a long name.
+ * Writes the entries into the directory at the given cluster and offset.
+ * @sbi: filesystem private data
+ * @dir_cluster: cluster of the directory
+ * @dir_offset: byte offset within the directory for the first LFN entry
+ * @name: the long file name
+ * @attr: file attributes for the 8.3 entry
+ * @first_cluster: first cluster of the file/directory
+ * @file_size: size of the file
+ * Returns number of entries written (LFN + 8.3), or negative on error.
+ */
+int fat32_write_lfn(struct fat32_sb_info *sbi, uint32_t dir_cluster,
+                    uint32_t dir_offset, const char *name, uint8_t attr,
+                    uint32_t first_cluster, uint32_t file_size);
+
+/*
+ * fat32_shortname_from_lfn: Generate an 8.3 short name from a long file name.
+ * @lfn: the long file name (null-terminated)
+ * @short_name: output buffer for the 11-byte 8.3 name (space-padded)
+ * Returns 0 on success, -1 if the name cannot be represented as 8.3.
+ */
+int fat32_shortname_from_lfn(const char *lfn, uint8_t *short_name);
+
+/*
+ * fat32_lfn_checksum: Compute the 8.3 checksum for LFN validation.
+ * @short_name: the 11-byte 8.3 short name
+ * Returns the checksum byte.
+ */
+uint8_t fat32_lfn_checksum(const uint8_t *short_name);
+
+/* ================================================================
+ * Directory operations API
+ * ================================================================ */
+
+/*
+ * fat32_mkdir: Create a subdirectory in the given parent directory.
+ * @sbi: filesystem private data
+ * @parent_cluster: first cluster of the parent directory
+ * @name: name of the new directory
+ * Returns 0 on success, negative on error.
+ */
+int fat32_mkdir(struct fat32_sb_info *sbi, uint32_t parent_cluster,
+                const char *name);
+
+/*
+ * fat32_rmdir: Remove an empty subdirectory from the given parent directory.
+ * @sbi: filesystem private data
+ * @parent_cluster: first cluster of the parent directory
+ * @name: name of the directory to remove
+ * Returns 0 on success, negative on error.
+ */
+int fat32_rmdir(struct fat32_sb_info *sbi, uint32_t parent_cluster,
+                const char *name);
+
+/* ================================================================
+ * Cluster allocation API
+ * ================================================================ */
+
+/*
+ * fat32_alloc_cluster: Allocate a free cluster, mark it as end-of-chain.
+ * @sbi: filesystem private data
+ * Returns the cluster number, or 0 on failure.
+ */
+uint32_t fat32_alloc_cluster(struct fat32_sb_info *sbi);
+
+/*
+ * fat32_free_cluster_chain: Free an entire cluster chain.
+ * @sbi: filesystem private data
+ * @start_cluster: first cluster in the chain to free
+ * Returns 0 on success, negative on error.
+ */
+int fat32_free_cluster_chain(struct fat32_sb_info *sbi, uint32_t start_cluster);
+
+/*
+ * fat32_find_free_cluster: Find a free cluster in the FAT table.
+ * @sbi: filesystem private data
+ * Returns the cluster number, or 0 on failure.
+ */
+uint32_t fat32_find_free_cluster(struct fat32_sb_info *sbi);
 
 #endif /* FAT32_H */

@@ -15,6 +15,7 @@
 #include "include/log.h"
 #include "include/kstdio.h"
 #include "include/print.h"
+#include "include/version.h"
 #include "console.h"
 #include "fs.h"
 #include <string.h>
@@ -591,6 +592,39 @@ int module_unload(const char *name) {
         kfree(mod->deps);
     }
 
+    /* Free dependency names */
+    if (mod->dep_names) {
+        for (int i = 0; i < mod->num_deps; i++) {
+            if (mod->dep_names[i]) kfree(mod->dep_names[i]);
+        }
+        kfree(mod->dep_names);
+    }
+
+    /*
+     * Clean up dependencies: for each module that depends on this module,
+     * remove this module from its dependency list.
+     */
+    for (struct kernel_module *m = module_head; m; m = m->next) {
+        if (m == mod || m->state != MODULE_LIVE) continue;
+        for (int i = 0; i < m->num_deps; i++) {
+            if (m->deps[i] == mod) {
+                /* Shift remaining deps */
+                for (int j = i; j < m->num_deps - 1; j++) {
+                    m->deps[j] = m->deps[j + 1];
+                }
+                m->num_deps--;
+                /* Free the dep name if it exists */
+                if (m->dep_names && m->dep_names[i]) {
+                    kfree(m->dep_names[i]);
+                    for (int j = i; j < m->num_deps; j++) {
+                        m->dep_names[j] = m->dep_names[j + 1];
+                    }
+                }
+                break;
+            }
+        }
+    }
+
     /* Free module memory */
     if (mod->base) {
         kfree(mod->base);
@@ -638,5 +672,136 @@ void module_init(void) {
         int sym_count = 0;
         for (struct module_symbol *s = kernel_syms; s; s = s->next) sym_count++;
         log_printf(LOG_LEVEL_INFO, "module: subsystem initialized, %d kernel symbols exported\n", sym_count);
+    }
+}
+
+/* ================================================================
+ * module_version_check: Check module version vs kernel version
+ *
+ * For .km modules, the module's version is embedded in the .modinfo
+ * section. For .ko modules, version defaults to 0.0.0 and is always
+ * considered compatible.
+ *
+ * A module is compatible if its major version matches the kernel's
+ * major version. Minor/patch mismatches are warnings but not errors.
+ * ================================================================ */
+int module_version_check(struct kernel_module *mod) {
+    if (!mod) return -1;
+
+    /* Version 0.0.0 means unversioned (.ko format) — always compatible */
+    if (mod->version.major == 0 && mod->version.minor == 0 &&
+        mod->version.patch == 0) {
+        return 0;
+    }
+
+    /* Major version must match */
+    if (mod->version.major != AURORAOS_MAJOR) {
+        log_printf(LOG_LEVEL_WARN,
+            "module_version_check: %s version %d.%d.%d incompatible with kernel %d.%d.%d\n",
+            mod->name,
+            mod->version.major, mod->version.minor, mod->version.patch,
+            AURORAOS_MAJOR, AURORAOS_MINOR, AURORAOS_PATCH);
+        return -1;
+    }
+
+    /* Minor version warning */
+    if (mod->version.minor > AURORAOS_MINOR) {
+        log_printf(LOG_LEVEL_WARN,
+            "module_version_check: %s minor version %d > kernel minor %d\n",
+            mod->name, mod->version.minor, AURORAOS_MINOR);
+    }
+
+    return 0;
+}
+
+/* ================================================================
+ * module_dep_check: Check module dependencies
+ *
+ * Verifies that all modules listed in dep_names are loaded and in
+ * LIVE state. If any dependency is missing, returns -1.
+ * ================================================================ */
+int module_dep_check(struct kernel_module *mod) {
+    if (!mod) return -1;
+
+    for (int i = 0; i < mod->num_deps; i++) {
+        if (!mod->deps[i] || mod->deps[i]->state != MODULE_LIVE) {
+            const char *dep_name = (mod->dep_names && mod->dep_names[i])
+                                   ? mod->dep_names[i] : "unknown";
+            log_printf(LOG_LEVEL_WARN,
+                "module_dep_check: %s depends on %s (not loaded)\n",
+                mod->name, dep_name);
+            return -1;
+        }
+    }
+
+    return 0;
+}
+
+/* ================================================================
+ * module_export_info: Export all loaded module metadata
+ *
+ * Returns a linked list of struct module_info, one per loaded module.
+ * Caller must free with module_info_free().
+ * ================================================================ */
+struct module_info *module_export_info(void) {
+    struct module_info *head = NULL;
+    struct module_info *tail = NULL;
+
+    for (struct kernel_module *m = module_head; m; m = m->next) {
+        struct module_info *info = (struct module_info *)kmalloc(sizeof(*info));
+        if (!info) continue;
+        memset(info, 0, sizeof(*info));
+
+        /* Copy name */
+        for (int i = 0; i < 63 && m->name[i]; i++)
+            info->name[i] = m->name[i];
+        info->name[63] = '\0';
+
+        /* Copy version */
+        info->ver.major = m->version.major;
+        info->ver.minor = m->version.minor;
+        info->ver.patch = m->version.patch;
+
+        /* Copy metadata */
+        for (int i = 0; i < 63 && m->author[i]; i++)
+            info->author[i] = m->author[i];
+        info->author[63] = '\0';
+
+        for (int i = 0; i < 127 && m->description[i]; i++)
+            info->description[i] = m->description[i];
+        info->description[127] = '\0';
+
+        for (int i = 0; i < 31 && m->license[i]; i++)
+            info->license[i] = m->license[i];
+        info->license[31] = '\0';
+
+        /* Copy state info */
+        info->state    = m->state;
+        info->refcount = m->refcount;
+        info->num_deps = m->num_deps;
+        info->base     = m->base;
+        info->size     = m->size;
+        info->next     = NULL;
+
+        /* Append to list */
+        if (!head) {
+            head = tail = info;
+        } else {
+            tail->next = info;
+            tail = info;
+        }
+    }
+
+    return head;
+}
+
+/* ================================================================
+ * module_info_free: Free the module info list
+ * ================================================================ */
+void module_info_free(struct module_info *list) {
+    while (list) {
+        struct module_info *next = list->next;
+        kfree(list);
+        list = next;
     }
 }

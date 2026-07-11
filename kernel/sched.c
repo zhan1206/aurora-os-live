@@ -12,6 +12,7 @@
 #include "smp.h"
 #include "include/log.h"
 #include "include/assert.h"
+#include "rbtree.h"
 #include "mem.h"
 #include "pagetable.h"
 #include "perf.h"
@@ -173,6 +174,7 @@ void scheduler_init(void) {
         per_cpu_rq[i].head = NULL;
         per_cpu_rq[i].count = 0;
         per_cpu_rq[i].lock = 0;
+        rb_init(&per_cpu_rq[i].ready_tree);
     }
 
     /* Create idle task (pid=0) — placed on CPU 0's run queue */
@@ -199,6 +201,8 @@ void scheduler_init(void) {
     /* Add idle to CPU 0's run queue */
     per_cpu_rq[0].head = current;
     per_cpu_rq[0].count = 1;
+    current->rb_node.key = current->vruntime;
+    rb_insert(&per_cpu_rq[0].ready_tree, &current->rb_node);
 
     /* Create init task (pid=1) */
     struct task_struct *init = (struct task_struct *)kmalloc(sizeof(*init));
@@ -361,6 +365,9 @@ struct task_struct *create_task(void (*fn)(void)) {
         rq->head->next = t;
     }
     rq->count++;
+    /* Also insert into red-black tree for O(log n) scheduling */
+    t->rb_node.key = t->vruntime;
+    rb_insert(&rq->ready_tree, &t->rb_node);
     add_child(current, t);
 
     log_printf(LOG_LEVEL_INFO, "Created task pid=%d on CPU %d\n", t->pid, target_cpu);
@@ -401,27 +408,26 @@ void schedule(void) {
     }
 
     /*
-     * Find the task with the smallest vruntime among READY tasks.
-     * This is the core of CFS/EEVDF: the task that has received the
-     * least CPU time runs next.
+     * Use the red-black tree to find the task with the smallest vruntime
+     * among READY tasks in O(log n). This replaces the O(n) linked-list scan.
+     * Falls back to idle task if the tree is empty.
      */
     struct task_struct *next = NULL;
-    struct task_struct *candidate = rq->head;
-    uint64_t best_vruntime = UINT64_MAX;
-    int scanned = 0;
-    int limit = rq->count + 1;
-
-    do {
-        if ((candidate->state == TASK_READY || candidate->state == TASK_RUNNING)
-            && candidate != current) {
-            if (candidate->vruntime < best_vruntime) {
-                best_vruntime = candidate->vruntime;
+    struct rb_node *min_node = rb_find_min(&rq->ready_tree);
+    if (min_node) {
+        /* Walk the tree in-order to find the first READY task */
+        struct rb_node *node = min_node;
+        while (node) {
+            /* Calculate the containing task_struct from the rb_node offset */
+            struct task_struct *candidate = (struct task_struct *)((uintptr_t)node - offsetof(struct task_struct, rb_node));
+            if ((candidate->state == TASK_READY || candidate->state == TASK_RUNNING)
+                && candidate != current) {
                 next = candidate;
+                break;
             }
+            node = rb_next(node);
         }
-        candidate = candidate->next;
-        scanned++;
-    } while (candidate != rq->head && scanned <= limit);
+    }
 
     /* If no runnable task found (or only current), fall back to idle or round-robin */
     if (!next) {
@@ -507,9 +513,78 @@ void yield(void) {
 
 void check_resched(void) {
     extern volatile int need_resched;
-    if (need_resched) {
+    if (need_resched || (current && current->need_resched)) {
         need_resched = 0;
-        if (current) current->state = TASK_READY;
+        if (current) {
+            current->need_resched = 0;
+            current->state = TASK_READY;
+        }
+        schedule();
+    }
+}
+
+/* ================================================================
+ * Preemptive scheduling — tick handler
+ * ================================================================ */
+
+/*
+ * schedule_tick: Called from the timer interrupt handler on each tick.
+ * Implements preemptive scheduling by decrementing the current task's
+ * time_slice. When the time slice is exhausted, the task is marked for
+ * preemption via need_resched. The actual context switch happens at the
+ * next safe point (iretq return or syscall return).
+ *
+ * Recharge: when time_slice reaches 0, the task's vruntime is NOT
+ * updated here — that happens in schedule() when the task is actually
+ * switched out. This ensures blocked tasks keep their low vruntime.
+ */
+void schedule_tick(void) {
+    if (!current) return;
+
+    /* Preemption is disabled — don't preempt */
+    if (current->preempt_count > 0) return;
+
+    if (current->state == TASK_RUNNING) {
+        if (current->time_slice > 0) {
+            current->time_slice--;
+        }
+        if (current->time_slice <= 0) {
+            /* Time slice exhausted — mark for preemption */
+            current->need_resched = 1;
+            /* Also set the global flag for backward compatibility */
+            extern volatile int need_resched;
+            __sync_lock_test_and_set(&need_resched, 1);
+            /* Recharge time slice for next run */
+            current->time_slice = BASE_SLICE * (256 - current->priority) / 256;
+            if (current->time_slice < 1) current->time_slice = 1;
+        }
+    }
+}
+
+/* ================================================================
+ * Preemption control
+ * ================================================================ */
+
+/*
+ * preempt_disable: Increment the preemption counter.
+ * While preempt_count > 0, schedule_tick() will not set need_resched
+ * and the task cannot be preempted.
+ */
+void preempt_disable(void) {
+    if (current) current->preempt_count++;
+}
+
+/*
+ * preempt_enable: Decrement the preemption counter.
+ * If preempt_count reaches 0 and need_resched is set, trigger a
+ * reschedule immediately by calling schedule().
+ */
+void preempt_enable(void) {
+    if (!current) return;
+    if (current->preempt_count > 0) current->preempt_count--;
+    if (current->preempt_count == 0 && current->need_resched) {
+        current->need_resched = 0;
+        current->state = TASK_READY;
         schedule();
     }
 }
@@ -576,6 +651,9 @@ void do_exit_current(int code) {
     if (rq->head == current) {
         rq->head = current->next;
     }
+
+    /* Also remove from the red-black tree */
+    rb_erase(&rq->ready_tree, &current->rb_node);
 
     /* Decrement run queue count */
     if (rq->count > 0) rq->count--;
@@ -705,6 +783,9 @@ void smp_enqueue_task(struct task_struct *t, int cpu_id) {
         rq->head->next = t;
     }
     rq->count++;
+    /* Also insert into the red-black tree */
+    t->rb_node.key = t->vruntime;
+    rb_insert(&rq->ready_tree, &t->rb_node);
 }
 
 /*
@@ -721,6 +802,7 @@ void smp_dequeue_task(struct task_struct *t, int cpu_id) {
     if (rq->head == t && t->next == t) {
         rq->head = NULL;
         rq->count = 0;
+        rb_erase(&rq->ready_tree, &t->rb_node);
         return;
     }
 
@@ -740,6 +822,8 @@ void smp_dequeue_task(struct task_struct *t, int cpu_id) {
         rq->head = t->next;
     }
     rq->count--;
+    /* Also remove from the red-black tree */
+    rb_erase(&rq->ready_tree, &t->rb_node);
 }
 
 /*

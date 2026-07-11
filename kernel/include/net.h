@@ -122,6 +122,95 @@ enum tcp_state {
 };
 
 /* ================================================================
+ * TCP Options (RFC 1323 / RFC 2018)
+ * ================================================================ */
+#define TCP_OPT_EOL            0
+#define TCP_OPT_NOP            1
+#define TCP_OPT_MSS            2
+#define TCP_OPT_WINDOW_SCALE   3
+#define TCP_OPT_SACK_PERM      4
+#define TCP_OPT_SACK           5
+#define TCP_OPT_TIMESTAMP      8
+
+struct tcp_option {
+    uint8_t  kind;
+    uint8_t  length;
+    uint8_t  data[];
+} __attribute__((packed));
+
+/* TCP option MSS (kind=2, length=4) */
+struct tcp_opt_mss {
+    uint8_t  kind;
+    uint8_t  length;
+    uint16_t mss;
+} __attribute__((packed));
+
+/* TCP option Window Scale (kind=3, length=3) */
+struct tcp_opt_window_scale {
+    uint8_t  kind;
+    uint8_t  length;
+    uint8_t  shift_cnt;
+} __attribute__((packed));
+
+/* TCP option SACK Permitted (kind=4, length=2) */
+struct tcp_opt_sack_perm {
+    uint8_t  kind;
+    uint8_t  length;
+} __attribute__((packed));
+
+/* TCP option Timestamp (kind=8, length=10) */
+struct tcp_opt_timestamp {
+    uint8_t  kind;
+    uint8_t  length;
+    uint32_t ts_val;
+    uint32_t ts_ecr;
+} __attribute__((packed));
+
+/* TCP option SACK (kind=5, variable length) */
+struct tcp_opt_sack {
+    uint8_t  kind;
+    uint8_t  length;
+    /* Followed by 8-byte blocks (left_edge, right_edge) */
+} __attribute__((packed));
+
+/* TCP congestion control states */
+enum tcp_cong_state {
+    TCP_CONG_SLOW_START,
+    TCP_CONG_AVOIDANCE,
+    TCP_CONG_RECOVERY
+};
+
+/* ================================================================
+ * IPv6 (RFC 2460)
+ * ================================================================ */
+#define IPV6_ADDR_LEN 16
+
+typedef struct ipv6_addr {
+    uint8_t  addr[16];
+} ipv6_addr_t;
+
+struct ipv6_hdr {
+    uint8_t  version_traffic_flow[4];  /* Version(4), Traffic Class(8), Flow Label(20) */
+    uint16_t payload_len;
+    uint8_t  next_header;
+    uint8_t  hop_limit;
+    uint8_t  src_addr[16];
+    uint8_t  dst_addr[16];
+} __attribute__((packed));
+
+#define IPV6_PROTO_ICMPV6  58
+#define IPV6_PROTO_TCP      6
+#define IPV6_PROTO_UDP     17
+
+/* IPv6 address helpers */
+#define IPV6_IS_UNSPECIFIED(a)  \
+    (memcmp((a)->addr, "\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0", 16) == 0)
+#define IPV6_IS_LOOPBACK(a)     \
+    (memcmp((a)->addr, "\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x01", 16) == 0)
+#define IPV6_IS_LINKLOCAL(a)    \
+    (((a)->addr[0] == 0xFE) && ((a)->addr[1] == 0x80))
+
+/* ================================================================
  * Network Interface
  * ================================================================ */
 #define NETIF_FLAG_UP      0x0001
@@ -133,10 +222,72 @@ struct net_if {
     uint8_t  mac[6];
     uint8_t  netmask[4];
     uint8_t  gateway[4];
+    uint8_t  dns_server[4];
     int      mtu;
     int      flags;
     struct net_device *netdev;
 };
+
+/* ================================================================
+ * DHCP (RFC 2131)
+ * ================================================================ */
+#define DHCP_CLIENT_PORT  68
+#define DHCP_SERVER_PORT  67
+#define DHCP_MAGIC_COOKIE 0x63825363
+
+#define DHCP_DISCOVER  1
+#define DHCP_OFFER     2
+#define DHCP_REQUEST   3
+#define DHCP_ACK       5
+#define DHCP_NAK       6
+
+#define DHCP_OPT_SUBNET_MASK  1
+#define DHCP_OPT_ROUTER       3
+#define DHCP_OPT_DNS          6
+#define DHCP_OPT_REQ_IP       50
+#define DHCP_OPT_MSG_TYPE     53
+#define DHCP_OPT_SERVER_ID    54
+#define DHCP_OPT_END          255
+
+struct dhcp_hdr {
+    uint8_t  op;
+    uint8_t  htype;
+    uint8_t  hlen;
+    uint8_t  hops;
+    uint32_t xid;
+    uint16_t secs;
+    uint16_t flags;
+    uint8_t  ciaddr[4];
+    uint8_t  yiaddr[4];
+    uint8_t  siaddr[4];
+    uint8_t  giaddr[4];
+    uint8_t  chaddr[16];
+    uint8_t  sname[64];
+    uint8_t  file[128];
+    uint32_t magic;
+} __attribute__((packed));
+
+/* ================================================================
+ * DNS
+ * ================================================================ */
+#define DNS_PORT           53
+#define DNS_QRY_STANDARD   0x0100
+#define DNS_TYPE_A         1
+#define DNS_CLASS_IN       1
+
+struct dns_header {
+    uint16_t id;
+    uint16_t flags;
+    uint16_t qdcount;
+    uint16_t ancount;
+    uint16_t nscount;
+    uint16_t arcount;
+} __attribute__((packed));
+
+/* ================================================================
+ * HTTP
+ * ================================================================ */
+#define HTTP_DEFAULT_PORT  80
 
 /* ================================================================
  * Network API
@@ -177,5 +328,38 @@ int  tcp_getpeername(int sock, uint8_t remote_ip[4], uint16_t *remote_port);
 /* Utility */
 struct net_if *net_get_interface(int index);
 int net_get_interface_count(void);
+
+/* ================================================================
+ * IPv6 API
+ * ================================================================ */
+void ipv6_init(void);
+int  ipv6_addr_from_str(const char *str, ipv6_addr_t *addr);
+void ipv6_addr_to_str(const ipv6_addr_t *addr, char *buf, size_t bufsz);
+int  ipv6_send(const ipv6_addr_t *dst, uint8_t next_header,
+               const void *data, uint16_t len);
+int  ipv6_recv(void *buf, int max_len, ipv6_addr_t *src, ipv6_addr_t *dst);
+
+/* IPv6 Neighbor Discovery */
+void ndp_init(void);
+int  ndp_lookup(const ipv6_addr_t *ip, uint8_t mac_out[6]);
+int  ndp_send_solicitation(const ipv6_addr_t *target);
+
+/* ================================================================
+ * TCP Congestion Control API
+ * ================================================================ */
+void tcp_cong_init(void);
+void tcp_cong_on_ack(int sock, uint32_t ack_seq, int dup_ack_count);
+void tcp_cong_on_timeout(int sock);
+
+/* DHCP */
+int dhcp_init(void);
+int dhcp_run(void);
+
+/* DNS */
+int  dns_query(const char *hostname, uint8_t ip_out[4]);
+void dns_set_server(const uint8_t ip[4]);
+
+/* HTTP */
+int  http_get(const char *url, char *response_buf, size_t buf_size);
 
 #endif /* NET_H */

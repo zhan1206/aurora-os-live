@@ -1161,11 +1161,532 @@ static long sys_getsockname(int sockfd, struct sockaddr_in *addr, int *addrlen) 
 }
 
 /* ================================================================
+ * SYS_ACCESS — Check file access permissions
+ * ================================================================ */
+static long sys_access(const char *path, int mode) {
+    if (!path) { current->t_errno = EFAULT; return -1; }
+    char kpath[256];
+    int len = strncpy_from_user(kpath, path, sizeof(kpath) - 1);
+    if (len < 0) { current->t_errno = EFAULT; return -1; }
+    kpath[len] = '\0';
+
+    struct inode *inode = vfs_lookup(kpath);
+    if (!inode) { current->t_errno = ENOENT; return -1; }
+
+    /* Simplified: always allow access (real permissions not implemented) */
+    (void)mode;
+    return 0;
+}
+
+/* ================================================================
+ * SYS_FCHMOD — Change file mode by fd
+ * ================================================================ */
+static long sys_fchmod(int fd, int mode) {
+    if (fd < 0 || fd >= MAX_FDS) { current->t_errno = EBADF; return -1; }
+    struct file *filp = (struct file *)fd_get(current, fd);
+    if (!filp || !filp->inode) { current->t_errno = EBADF; return -1; }
+
+    if (filp->inode->ops && filp->inode->ops->chmod) {
+        int ret = filp->inode->ops->chmod(filp->inode, mode);
+        if (ret < 0) { current->t_errno = EACCES; return -1; }
+    }
+    return 0;
+}
+
+/* ================================================================
+ * SYS_FCHOWN — Change file owner by fd (simplified)
+ * ================================================================ */
+static long sys_fchown(int fd, int uid, int gid) {
+    if (fd < 0 || fd >= MAX_FDS) { current->t_errno = EBADF; return -1; }
+    struct file *filp = (struct file *)fd_get(current, fd);
+    if (!filp) { current->t_errno = EBADF; return -1; }
+
+    /* Simplified: chown not implemented, no-op for uid/gid 0 */
+    (void)uid; (void)gid;
+    return 0;
+}
+
+/* ================================================================
+ * SYS_FTRUNCATE — Truncate file to specified length
+ * ================================================================ */
+static long sys_ftruncate(int fd, off_t length) {
+    if (fd < 0 || fd >= MAX_FDS) { current->t_errno = EBADF; return -1; }
+    if (length < 0) { current->t_errno = EINVAL; return -1; }
+
+    struct file *filp = (struct file *)fd_get(current, fd);
+    if (!filp || !filp->inode) { current->t_errno = EBADF; return -1; }
+
+    /* Simplified: just update the inode size */
+    if (filp->inode) {
+        filp->inode->size = (size_t)length;
+    }
+
+    /* If the file offset is beyond the new length, adjust it */
+    if (filp->offset > (off_t)length) {
+        filp->offset = (off_t)length;
+    }
+
+    return 0;
+}
+
+/* ================================================================
+ * SYS_FSYNC — Synchronize file to disk
+ * ================================================================ */
+static long sys_fsync(int fd) {
+    if (fd < 0 || fd >= MAX_FDS) { current->t_errno = EBADF; return -1; }
+    struct file *filp = (struct file *)fd_get(current, fd);
+    if (!filp) { current->t_errno = EBADF; return -1; }
+
+    /* Simplified: ramfs is always "in sync", no-op */
+    return 0;
+}
+
+/* ================================================================
+ * SYS_READLINK — Read target of symbolic link
+ * ================================================================ */
+static long sys_readlink(const char *path, char *buf, size_t bufsize) {
+    if (!path || !buf) { current->t_errno = EFAULT; return -1; }
+    if (!user_addr_range_ok(buf, bufsize)) { current->t_errno = EFAULT; return -1; }
+
+    char kpath[256];
+    int len = strncpy_from_user(kpath, path, sizeof(kpath) - 1);
+    if (len < 0) { current->t_errno = EFAULT; return -1; }
+    kpath[len] = '\0';
+
+    /* Simplified: no symlink support, return the path itself */
+    size_t copy_len = (size_t)len;
+    if (copy_len >= bufsize) copy_len = bufsize - 1;
+    if (copy_to_user(buf, kpath, copy_len) != 0) {
+        current->t_errno = EFAULT; return -1;
+    }
+    /* Null-terminate */
+    {
+        char zero = '\0';
+        if (copy_len < bufsize) {
+            copy_to_user(buf + copy_len, &zero, 1);
+        }
+    }
+    return (long)copy_len;
+}
+
+/* ================================================================
+ * SYS_SYMLINK — Create a symbolic link
+ * ================================================================ */
+static long sys_symlink(const char *target, const char *linkpath) {
+    if (!target || !linkpath) { current->t_errno = EFAULT; return -1; }
+
+    char ktarget[256], klink[256];
+    int tlen = strncpy_from_user(ktarget, target, sizeof(ktarget) - 1);
+    int llen = strncpy_from_user(klink, linkpath, sizeof(klink) - 1);
+    if (tlen < 0 || llen < 0) { current->t_errno = EFAULT; return -1; }
+    ktarget[tlen] = '\0';
+    klink[llen] = '\0';
+
+    /* Simplified: create a regular file containing the target path */
+    struct file *f = vfs_open(klink, O_CREAT | O_WRONLY);
+    if (!f) { current->t_errno = EACCES; return -1; }
+    vfs_write(f, ktarget, (size_t)(tlen + 1));
+    vfs_close(f);
+    return 0;
+}
+
+/* ================================================================
+ * SYS_GETPPID — Get parent process ID
+ * ================================================================ */
+static long sys_getppid(void) {
+    if (!current) { current->t_errno = ESRCH; return -1; }
+    if (!current->parent) return 0;  /* init has no parent */
+    return current->parent->pid;
+}
+
+/* ================================================================
+ * SYS_GETUID — Get real user ID
+ * ================================================================ */
+static long sys_getuid(void) {
+    return 0;  /* single-user OS, always root */
+}
+
+/* ================================================================
+ * SYS_GETEUID — Get effective user ID
+ * ================================================================ */
+static long sys_geteuid(void) {
+    return 0;  /* single-user OS, always root */
+}
+
+/* ================================================================
+ * SYS_GETGID — Get real group ID
+ * ================================================================ */
+static long sys_getgid(void) {
+    return 0;  /* single-user OS, always root */
+}
+
+/* ================================================================
+ * SYS_GETEGID — Get effective group ID
+ * ================================================================ */
+static long sys_getegid(void) {
+    return 0;  /* single-user OS, always root */
+}
+
+/* ================================================================
+ * SYS_SETUID — Set user ID (simplified)
+ * ================================================================ */
+static long sys_setuid(int uid) {
+    (void)uid;
+    return 0;  /* single-user OS, always allowed */
+}
+
+/* ================================================================
+ * SYS_SETGID — Set group ID (simplified)
+ * ================================================================ */
+static long sys_setgid(int gid) {
+    (void)gid;
+    return 0;  /* single-user OS, always allowed */
+}
+
+/* ================================================================
+ * SYS_GETPGID — Get process group ID of a process
+ * ================================================================ */
+static long sys_getpgid(int pid) {
+    struct task_struct *t;
+    if (pid == 0) {
+        t = current;
+    } else {
+        t = find_task_by_pid(pid);
+    }
+    if (!t) { current->t_errno = ESRCH; return -1; }
+    /* Simplified: pgid = pid for now */
+    return t->pid;
+}
+
+/* ================================================================
+ * SYS_SETPGID — Set process group ID
+ * ================================================================ */
+static long sys_setpgid(int pid, int pgid) {
+    (void)pid; (void)pgid;
+    /* Simplified: process groups not fully implemented */
+    return 0;
+}
+
+/* ================================================================
+ * SYS_SETSID — Create a new session
+ * ================================================================ */
+static long sys_setsid(void) {
+    if (!current) { current->t_errno = ESRCH; return -1; }
+    /* Simplified: return current PID as session ID */
+    return current->pid;
+}
+
+/* ================================================================
+ * SYS_NICE — Change process priority (simplified)
+ * ================================================================ */
+static long sys_nice(int inc) {
+    if (!current) { current->t_errno = ESRCH; return -1; }
+    int new_prio = current->priority + inc;
+    if (new_prio < 0) new_prio = 0;
+    if (new_prio > 255) new_prio = 255;
+    current->priority = new_prio;
+    return new_prio;
+}
+
+/* ================================================================
+ * SYS_BRK — Change program break (data segment end)
+ * ================================================================ */
+static long sys_brk(void *addr) {
+    /* Simplified: always succeeds, returns the requested address */
+    if (!addr) {
+        /* Return current brk (we don't track it, return 0) */
+        return 0;
+    }
+    return (long)(uintptr_t)addr;
+}
+
+/* ================================================================
+ * SYS_SBRK — Adjust heap size (not a standard Linux syscall, but
+ * often implemented in libc)
+ * ================================================================ */
+static long sys_sbrk(intptr_t increment) {
+    /* Simplified: sbrk via brk */
+    static uint64_t current_brk = 0x70000000ULL;  /* heap start */
+    if (increment == 0) return (long)current_brk;
+
+    uint64_t old_brk = current_brk;
+    uint64_t new_brk = current_brk + (uint64_t)increment;
+
+    /* Allocate pages for the heap expansion */
+    if (increment > 0) {
+        size_t num_pages = ((size_t)increment + PAGE_SIZE - 1) / PAGE_SIZE;
+        for (size_t i = 0; i < num_pages; i++) {
+            void *phys = alloc_page();
+            if (!phys) { current->t_errno = ENOMEM; return -1; }
+            memset(phys, 0, PAGE_SIZE);
+            if (map_page(current->cr3, old_brk + i * PAGE_SIZE,
+                         (uint64_t)(uintptr_t)phys, PTE_USER | PTE_RW) != 0) {
+                free_page(phys);
+                current->t_errno = ENOMEM; return -1;
+            }
+        }
+    }
+
+    current_brk = new_brk;
+    return (long)old_brk;
+}
+
+/* ================================================================
+ * SYS_MADVISE — Give advice about memory usage
+ * ================================================================ */
+static long sys_madvise(void *addr, size_t length, int advice) {
+    if (!addr || length == 0) { current->t_errno = EINVAL; return -1; }
+    if (!user_addr_range_ok(addr, length)) { current->t_errno = EFAULT; return -1; }
+    /* Simplified: accept all advice, no-op */
+    (void)advice;
+    return 0;
+}
+
+/* ================================================================
+ * SYS_CLOCK_GETTIME — Get clock time
+ * ================================================================ */
+static long sys_clock_gettime(int clock_id, struct timespec *tp) {
+    if (!tp || !user_addr_range_ok(tp, sizeof(struct timespec))) {
+        current->t_errno = EFAULT; return -1;
+    }
+
+    struct timespec ts;
+    uint64_t tv_sec, tv_usec;
+    rtc_get_timeval(&tv_sec, &tv_usec);
+
+    switch (clock_id) {
+        case 0: /* CLOCK_REALTIME */
+            ts.tv_sec = tv_sec;
+            ts.tv_nsec = tv_usec * 1000;
+            break;
+        case 1: /* CLOCK_MONOTONIC */
+            ts.tv_sec = rtc_get_uptime_seconds();
+            ts.tv_nsec = 0;
+            break;
+        default:
+            current->t_errno = EINVAL;
+            return -1;
+    }
+
+    if (copy_to_user(tp, &ts, sizeof(ts)) != 0) {
+        current->t_errno = EFAULT; return -1;
+    }
+    return 0;
+}
+
+/* ================================================================
+ * SYS_PIPE2 — Create a pipe with flags
+ * ================================================================ */
+static long sys_pipe2(int *fds, int flags) {
+    if (!fds || !user_addr_range_ok(fds, 2 * sizeof(int))) {
+        current->t_errno = EFAULT; return -1;
+    }
+
+    int ret = sys_pipe(fds);
+    (void)flags;  /* flags not fully supported yet */
+    return ret;
+}
+
+/* ================================================================
+ * SYS_FCNTL — File control operations
+ * ================================================================ */
+static long sys_fcntl(int fd, int cmd, long arg) {
+    if (fd < 0 || fd >= MAX_FDS) { current->t_errno = EBADF; return -1; }
+    struct file *filp = (struct file *)fd_get(current, fd);
+    if (!filp) { current->t_errno = EBADF; return -1; }
+
+    switch (cmd) {
+        case 0: /* F_DUPFD — duplicate fd */
+            return (long)fd_dup(current, fd);
+        case 1: /* F_GETFD — get fd flags */
+            return 0;
+        case 2: /* F_SETFD — set fd flags */
+            (void)arg;
+            return 0;
+        case 3: /* F_GETFL — get file status flags */
+            return filp->flags;
+        case 4: /* F_SETFL — set file status flags */
+            filp->flags = (int)arg;
+            return 0;
+        default:
+            current->t_errno = EINVAL;
+            return -1;
+    }
+}
+
+/* ================================================================
+ * SYS_CHOWN — Change file owner by path (simplified)
+ * ================================================================ */
+static long sys_chown(const char *path, int uid, int gid) {
+    if (!path) { current->t_errno = EFAULT; return -1; }
+    char kpath[256];
+    int len = strncpy_from_user(kpath, path, sizeof(kpath) - 1);
+    if (len < 0) { current->t_errno = EFAULT; return -1; }
+    kpath[len] = '\0';
+
+    struct inode *inode = vfs_lookup(kpath);
+    if (!inode) { current->t_errno = ENOENT; return -1; }
+
+    /* Simplified: chown not implemented, no-op */
+    (void)uid; (void)gid;
+    return 0;
+}
+
+/* ================================================================
+ * SYS_SYSINFO — Return system information
+ * ================================================================ */
+struct sysinfo {
+    uint64_t uptime;       /* seconds since boot */
+    uint64_t loads[3];     /* 1, 5, 15 min load averages */
+    uint64_t totalram;     /* total usable main memory size */
+    uint64_t freeram;      /* available memory size */
+    uint64_t sharedram;    /* amount of shared memory */
+    uint64_t bufferram;    /* memory used by buffers */
+    uint64_t totalswap;    /* total swap space size */
+    uint64_t freeswap;     /* swap space still available */
+    uint16_t procs;        /* number of current processes */
+    uint16_t pad;          /* padding */
+    uint64_t totalhigh;    /* total high memory size */
+    uint64_t freehigh;     /* available high memory size */
+    uint32_t mem_unit;     /* memory unit size in bytes */
+};
+
+static long sys_sysinfo(struct sysinfo *info) {
+    if (!info || !user_addr_range_ok(info, sizeof(struct sysinfo))) {
+        current->t_errno = EFAULT; return -1;
+    }
+
+    struct sysinfo si;
+    memset(&si, 0, sizeof(si));
+
+    si.uptime = rtc_get_uptime_seconds();
+    si.loads[0] = si.loads[1] = si.loads[2] = 0;
+
+    uint64_t total, free, used;
+    mem_get_stats(&total, &free, &used);
+    si.totalram = total;
+    si.freeram = free;
+    si.sharedram = 0;
+    si.bufferram = 0;
+    si.totalswap = 0;
+    si.freeswap = 0;
+
+    /* Count tasks */
+    si.procs = 0;
+    {
+        extern struct task_struct *current;
+        /* Simple count: just return 1+ for now */
+        si.procs = 3;
+    }
+
+    si.totalhigh = 0;
+    si.freehigh = 0;
+    si.mem_unit = 1;
+
+    if (copy_to_user(info, &si, sizeof(si)) != 0) {
+        current->t_errno = EFAULT; return -1;
+    }
+    return 0;
+}
+
+/* ================================================================
+ * SYS_GETRLIMIT — Get resource limits
+ * ================================================================ */
+struct rlimit {
+    uint64_t rlim_cur;
+    uint64_t rlim_max;
+};
+
+#define RLIMIT_STACK    3
+#define RLIMIT_NOFILE   7
+#define RLIMIT_AS       9
+
+static long sys_getrlimit(int resource, struct rlimit *rlim) {
+    if (!rlim || !user_addr_range_ok(rlim, sizeof(struct rlimit))) {
+        current->t_errno = EFAULT; return -1;
+    }
+
+    struct rlimit rl;
+    memset(&rl, 0, sizeof(rl));
+
+    switch (resource) {
+        case RLIMIT_STACK:
+            rl.rlim_cur = 8 * 1024 * 1024;  /* 8 MB */
+            rl.rlim_max = 8 * 1024 * 1024;
+            break;
+        case RLIMIT_NOFILE:
+            rl.rlim_cur = MAX_FDS;
+            rl.rlim_max = MAX_FDS;
+            break;
+        case RLIMIT_AS:
+            rl.rlim_cur = 0xFFFFFFFFFFFFFFFFULL;
+            rl.rlim_max = 0xFFFFFFFFFFFFFFFFULL;
+            break;
+        default:
+            current->t_errno = EINVAL;
+            return -1;
+    }
+
+    if (copy_to_user(rlim, &rl, sizeof(rl)) != 0) {
+        current->t_errno = EFAULT; return -1;
+    }
+    return 0;
+}
+
+/* ================================================================
+ * SYS_SETRLIMIT — Set resource limits (simplified)
+ * ================================================================ */
+static long sys_setrlimit(int resource, const struct rlimit *rlim) {
+    if (!rlim || !user_addr_range_ok(rlim, sizeof(struct rlimit))) {
+        current->t_errno = EFAULT; return -1;
+    }
+
+    /* Simplified: accept all, no-op */
+    (void)resource;
+    return 0;
+}
+
+/* ================================================================
+ * SYS_SCHED_YIELD — Yield the processor
+ * ================================================================ */
+static long sys_sched_yield(void) {
+    yield();
+    return 0;
+}
+
+/* ================================================================
+ * SYS_GETRANDOM — Get random bytes (simplified)
+ * ================================================================ */
+static long sys_getrandom(void *buf, size_t buflen, unsigned int flags) {
+    if (!buf || buflen == 0) { current->t_errno = EINVAL; return -1; }
+    if (!user_addr_range_ok(buf, buflen)) { current->t_errno = EFAULT; return -1; }
+
+    /* Simplified: use a simple LCG for pseudo-random bytes */
+    static uint64_t seed = 0x12345678;
+    (void)flags;
+
+    uint8_t *kbuf = (uint8_t *)kmalloc(buflen);
+    if (!kbuf) { current->t_errno = ENOMEM; return -1; }
+
+    for (size_t i = 0; i < buflen; i++) {
+        seed = seed * 6364136223846793005ULL + 1;
+        kbuf[i] = (uint8_t)(seed >> 32);
+    }
+
+    if (copy_to_user(buf, kbuf, buflen) != 0) {
+        kfree(kbuf);
+        current->t_errno = EFAULT; return -1;
+    }
+    kfree(kbuf);
+    return (long)buflen;
+}
+
+/* ================================================================
  * Dispatcher
  * ================================================================ */
 
 /* Maximum valid syscall number */
-#define SYS_MAX_NUM  128
+#define SYS_MAX_NUM  384
 
 long handle_syscall(int num, uint64_t a1, uint64_t a2, uint64_t a3,
                      uint64_t a4, uint64_t a5, uint64_t a6) {
@@ -1238,6 +1759,37 @@ long handle_syscall(int num, uint64_t a1, uint64_t a2, uint64_t a3,
         /* Socket management */
         case SYS_SHUTDOWN: ret = sys_shutdown((int)a1, (int)a2); break;
         case SYS_GETSOCKNAME: ret = sys_getsockname((int)a1, (struct sockaddr_in *)a2, (int *)a3); break;
+        /* Extended POSIX syscalls */
+        case SYS_ACCESS:    ret = sys_access((const char *)a1, (int)a2); break;
+        case SYS_FCHMOD:    ret = sys_fchmod((int)a1, (int)a2); break;
+        case SYS_FCHOWN:    ret = sys_fchown((int)a1, (int)a2, (int)a3); break;
+        case SYS_FTRUNCATE: ret = sys_ftruncate((int)a1, (off_t)a2); break;
+        case SYS_FSYNC:     ret = sys_fsync((int)a1); break;
+        case SYS_READLINK:  ret = sys_readlink((const char *)a1, (char *)a2, (size_t)a3); break;
+        case SYS_SYMLINK:   ret = sys_symlink((const char *)a1, (const char *)a2); break;
+        case SYS_GETPPID:   ret = sys_getppid(); break;
+        case SYS_GETUID:    ret = sys_getuid(); break;
+        case SYS_GETEUID:   ret = sys_geteuid(); break;
+        case SYS_GETGID:    ret = sys_getgid(); break;
+        case SYS_GETEGID:   ret = sys_getegid(); break;
+        case SYS_SETUID:    ret = sys_setuid((int)a1); break;
+        case SYS_SETGID:    ret = sys_setgid((int)a1); break;
+        case SYS_GETPGID:   ret = sys_getpgid((int)a1); break;
+        case SYS_SETPGID:   ret = sys_setpgid((int)a1, (int)a2); break;
+        case SYS_SETSID:    ret = sys_setsid(); break;
+        case SYS_NICE:      ret = sys_nice((int)a1); break;
+        case SYS_BRK:       ret = sys_brk((void *)a1); break;
+        case SYS_SBRK:      ret = sys_sbrk((intptr_t)a1); break;
+        case SYS_MADVISE:   ret = sys_madvise((void *)a1, (size_t)a2, (int)a3); break;
+        case SYS_CLOCK_GETTIME: ret = sys_clock_gettime((int)a1, (struct timespec *)a2); break;
+        case SYS_PIPE2:     ret = sys_pipe2((int *)a1, (int)a2); break;
+        case SYS_FCNTL:     ret = sys_fcntl((int)a1, (int)a2, (long)a3); break;
+        case SYS_CHOWN:     ret = sys_chown((const char *)a1, (int)a2, (int)a3); break;
+        case SYS_SYSINFO:   ret = sys_sysinfo((struct sysinfo *)a1); break;
+        case SYS_GETRLIMIT: ret = sys_getrlimit((int)a1, (struct rlimit *)a2); break;
+        case SYS_SETRLIMIT: ret = sys_setrlimit((int)a1, (const struct rlimit *)a2); break;
+        case SYS_SCHED_YIELD: ret = sys_sched_yield(); break;
+        case SYS_GETRANDOM: ret = sys_getrandom((void *)a1, (size_t)a2, (unsigned int)a3); break;
         default:
             current->t_errno = ENOSYS;
             ret = -1;
