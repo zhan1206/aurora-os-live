@@ -1,5 +1,31 @@
 # AuroraOS Changelog
 
+## v4.0.1 (2026-07-11) — 死代码集成修复 + 测试基础设施重写
+
+### 🔴 严重修复 (Critical)
+- **死代码集成**: 以下模块此前虽有代码实现但从未被实际调用，现已全部集成到内核启动流程中：
+  - **squashfs**: `fs_init()` 现在在 ext2/ramfs 挂载后尝试查找 `squashfs0` 块设备并挂载到 `/squashfs`
+  - **NVMe**: `nvme_init()` 现在在 `kernel_main()` 的文件系统初始化之前调用，增加启动进度步骤
+  - **DHCP**: `dhcp_init()` 现在在 `net_init()` 中自动调用，并自动运行 `dhcp_run()` 获取 IP
+  - **IPv6**: `ipv6_init()` 在 `net_init()` 中调用，`ipv6_handle_packet()` 集成到 `process_eth_frame()` 的 ETH_IPV6 分发路径
+
+### 🧪 测试修复 (Test Fixes)
+- **HTTP 自测试**: 修复 `test_http_parse()` 中形同虚设的断言——NULL URL 测试现在真正检查返回值，良性 URL 测试验证返回值范围
+- **冒烟测试重写**: 从 shell 脚本重写为 Python 脚本 (`scripts/smoke_test.py`)，通过 `subprocess` PIPE 真正向 QEMU 串口发送命令并检查输出
+- **回归测试修复**: 重写为交互式脚本，DHCP/DNS/HTTP/FAT32 测试从"找不到就跳过"改为"找不到就失败"，确保死代码不会被伪装成"通过"
+
+### 📝 文档修复 (Documentation)
+- **architecture.md**: 移除"全部完成"的不实声明，多架构从"✅ 已完成"移到"⚠️ 部分完成"（代码已准备但未集成到构建系统），消除"已完成"与"下一阶段"之间的自相矛盾
+- **arch.h**: 注释从"目前只有 x86_64 被实际编译"改为"x86_64 为主构建目标，多架构代码已准备"
+
+### 🔧 构建系统
+- **Makefile**: 新增 `arch-riscv64`、`arch-aarch64`、`arch-loongarch64`、`arch-all` 多架构构建目标，自动检测交叉编译器
+
+### 版本控制
+- 版本号: v4.0.1
+
+---
+
 ## v4.0.0 (2026-07-11) — 重大功能更新：紧急+短期+中期+长期规划全面实现
 
 ### 🚀 新增功能 (New Features)

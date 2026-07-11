@@ -1283,6 +1283,9 @@ static void process_eth_frame(struct net_device *netdev,
     case ETH_IPV4:
         ip_handle_packet(netdev, payload, payload_len);
         break;
+    case ETH_IPV6:
+        ipv6_handle_packet(netdev, payload, payload_len);
+        break;
     default:
         break;
     }
@@ -1368,6 +1371,15 @@ void net_init(void) {
     }
 
     log_printf(LOG_LEVEL_INFO, "net: initialized %d interface(s)\n", net_if_count);
+
+    /* Initialize DHCP client */
+    dhcp_init();
+
+    /* Initialize IPv6 stack */
+    ipv6_init();
+
+    /* Try to obtain IP via DHCP */
+    dhcp_run();
 }
 
 void net_poll(void) {

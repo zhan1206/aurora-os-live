@@ -32,6 +32,14 @@ else
   OBJCOPY := $(OC_CROSS)
 endif
 
+# Cross-compiler paths for multi-arch
+RISCV64_CC  := $(shell which riscv64-unknown-elf-gcc 2>/dev/null || which riscv64-linux-gnu-gcc 2>/dev/null)
+RISCV64_LD  := $(shell which riscv64-unknown-elf-ld 2>/dev/null || which riscv64-linux-gnu-ld 2>/dev/null)
+AARCH64_CC  := $(shell which aarch64-linux-gnu-gcc 2>/dev/null || which aarch64-elf-gcc 2>/dev/null)
+AARCH64_LD  := $(shell which aarch64-linux-gnu-ld 2>/dev/null || which aarch64-elf-ld 2>/dev/null)
+LOONGARCH64_CC := $(shell which loongarch64-linux-gnu-gcc 2>/dev/null)
+LOONGARCH64_LD := $(shell which loongarch64-linux-gnu-ld 2>/dev/null)
+
 # Auto-detect version from version.h (single source of truth)
 AURORAOS_MAJOR := $(shell grep 'AURORAOS_MAJOR' kernel/include/version.h | grep -o '[0-9]\+' | head -1)
 AURORAOS_MINOR := $(shell grep 'AURORAOS_MINOR' kernel/include/version.h | grep -o '[0-9]\+' | head -1)
@@ -81,7 +89,7 @@ OBJS := $(patsubst $(SRCDIR)/%.c,$(BUILDDIR)/%.o,$(K_C_SRCS))
 OBJS += $(patsubst arch/%.S,$(BUILDDIR)/arch/%.o,$(filter arch/%,$(K_S_SRCS)))
 OBJS += $(patsubst $(SRCDIR)/%.S,$(BUILDDIR)/%.o,$(filter $(SRCDIR)/%,$(K_S_SRCS)))
 
-.PHONY: all debug uefi clean iso run help modules version test smoke-test regression-test check-update checksum modules-build modules-clean
+.PHONY: all debug uefi clean iso run help modules version test smoke-test regression-test check-update checksum modules-build modules-clean arch-riscv64 arch-aarch64 arch-loongarch64 arch-all
 
 all: $(KERNEL)
 
@@ -163,6 +171,10 @@ help:
 	@echo "  make test         - build and run automated tests (smoke + self-test)"
 	@echo "  make smoke-test   - build ISO and run smoke test"
 	@echo "  make regression-test - build ISO and run regression test suite"
+	@echo "  make arch-riscv64    - build riscv64 kernel stub (needs cross-compiler)"
+	@echo "  make arch-aarch64    - build aarch64 kernel stub (needs cross-compiler)"
+	@echo "  make arch-loongarch64- build loongarch64 kernel stub (needs cross-compiler)"
+	@echo "  make arch-all        - build all architecture stubs"
 	@echo ""
 	@echo "Toolchain: CC=$(CC) LD=$(LD) OBJCOPY=$(OBJCOPY)"
 	@echo "Build:     $(BUILD_TYPE) | $(BUILD_DATE) | $(GIT_HASH)"
@@ -252,3 +264,51 @@ modules-clean:
 	done 2>/dev/null || true
 	@rm -rf $(BUILDDIR)/modules
 	@echo "  Modules cleaned."
+
+# ================================================================
+# Multi-architecture build targets
+# ================================================================
+
+# riscv64 kernel build
+.PHONY: arch-riscv64
+arch-riscv64:
+ifeq ($(RISCV64_CC),)
+	$(warning riscv64 cross-compiler not found, skipping)
+else
+	@mkdir -p $(BUILDDIR)/arch/riscv64
+	@echo "  CC[riscv64] arch/riscv64/boot.o"
+	$(RISCV64_CC) -ffreestanding -nostdlib -march=rv64gc -mabi=lp64 -c arch/riscv64/boot.S -o $(BUILDDIR)/arch/riscv64/boot.o
+	$(RISCV64_CC) -ffreestanding -nostdlib -march=rv64gc -mabi=lp64 -c arch/riscv64/context.S -o $(BUILDDIR)/arch/riscv64/context.o
+	@echo "  riscv64 kernel stub built"
+endif
+
+# aarch64 kernel build
+.PHONY: arch-aarch64
+arch-aarch64:
+ifeq ($(AARCH64_CC),)
+	$(warning aarch64 cross-compiler not found, skipping)
+else
+	@mkdir -p $(BUILDDIR)/arch/aarch64
+	@echo "  CC[aarch64] arch/aarch64/boot.o"
+	$(AARCH64_CC) -ffreestanding -nostdlib -c arch/aarch64/boot.S -o $(BUILDDIR)/arch/aarch64/boot.o
+	$(AARCH64_CC) -ffreestanding -nostdlib -c arch/aarch64/context.S -o $(BUILDDIR)/arch/aarch64/context.o
+	@echo "  aarch64 kernel stub built"
+endif
+
+# loongarch64 kernel build
+.PHONY: arch-loongarch64
+arch-loongarch64:
+ifeq ($(LOONGARCH64_CC),)
+	$(warning loongarch64 cross-compiler not found, skipping)
+else
+	@mkdir -p $(BUILDDIR)/arch/loongarch64
+	@echo "  CC[loongarch64] arch/loongarch64/boot.o"
+	$(LOONGARCH64_CC) -ffreestanding -nostdlib -c arch/loongarch64/boot.S -o $(BUILDDIR)/arch/loongarch64/boot.o
+	$(LOONGARCH64_CC) -ffreestanding -nostdlib -c arch/loongarch64/context.S -o $(BUILDDIR)/arch/loongarch64/context.o
+	@echo "  loongarch64 kernel stub built"
+endif
+
+# Build all architectures
+.PHONY: arch-all
+arch-all: arch-riscv64 arch-aarch64 arch-loongarch64
+	@echo "  Multi-arch build complete"

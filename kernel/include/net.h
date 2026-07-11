@@ -11,6 +11,7 @@
  * ================================================================ */
 #define ETH_IPV4  0x0800
 #define ETH_ARP   0x0806
+#define ETH_IPV6  0x86DD
 
 struct eth_hdr {
     uint8_t  dst_mac[6];
@@ -343,6 +344,9 @@ int  ipv6_recv(void *buf, int max_len, ipv6_addr_t *src, ipv6_addr_t *dst);
 void ndp_init(void);
 int  ndp_lookup(const ipv6_addr_t *ip, uint8_t mac_out[6]);
 int  ndp_send_solicitation(const ipv6_addr_t *target);
+
+/* IPv6 packet handler (called from Ethernet layer) */
+void ipv6_handle_packet(struct net_device *netdev, const uint8_t *data, int len);
 
 /* ================================================================
  * TCP Congestion Control API

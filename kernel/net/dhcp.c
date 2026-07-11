@@ -41,6 +41,12 @@ int dhcp_init(void) {
     memset(dhcp_server_ip, 0, 4);
     dhcp_initialized = 1;
     log_printf(LOG_LEVEL_INFO, "dhcp: client initialized\n");
+
+    /* Auto-run DHCP if there is a network interface available */
+    if (net_get_interface_count() > 0) {
+        dhcp_run();
+    }
+
     return 0;
 }
 

@@ -32,6 +32,7 @@
 #include "rtc.h"
 #include "cmdline.h"
 #include "drm.h"
+#include "nvme.h"
 #include "../boot/boot_info.h"
 
 /* ================================================================
@@ -195,7 +196,7 @@ void kernel_main(uint32_t magic, void *mb_info) {
     console_write_ansi(SGR_RESET);
     console_vpad(1);
 
-    int boot_step = 0, boot_total = 18;
+    int boot_step = 0, boot_total = 19;
     #define BOOT_STEP() do { \
         boot_step++; \
         console_write_ansi(BOOT_PROGRESS_FILL); \
@@ -303,6 +304,10 @@ void kernel_main(uint32_t magic, void *mb_info) {
 
     sysctl_init();
     console_status_ok("Sysctl interface");
+    BOOT_STEP();
+
+    nvme_init();
+    console_status_ok("NVMe driver (PCI enumeration)");
     BOOT_STEP();
 
     /* === Phase 3.5: File System === */

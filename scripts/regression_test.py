@@ -2,7 +2,8 @@
 """regression_test.py - AuroraOS automated regression test framework.
 
 Runs system call tests, filesystem tests, and network tests by booting
-the OS in QEMU with a test script and checking serial output.
+the OS in QEMU with serial console on stdio, sending interactive commands
+via stdin, and checking serial output.
 
 Usage:
     python3 scripts/regression_test.py [--verbose] [--timeout SECONDS]
@@ -19,15 +20,16 @@ import sys
 import time
 import json
 import signal
+import shutil
 import argparse
+import threading
 import subprocess
-from datetime import datetime
+from datetime import datetime, timezone
 
 # --- Configuration ---
 ISO_PATH = os.environ.get("ISO_PATH", "os.iso")
 QEMU_BIN = os.environ.get("QEMU", "qemu-system-x86_64")
 QEMU_MEM = os.environ.get("QEMU_MEM", "256M")
-LOG_FILE = "/tmp/aurora_regression_test.log"
 REPORT_FILE = "test_report.json"
 
 # --- Test registry ---
@@ -36,6 +38,11 @@ fail_count = 0
 skip_count = 0
 test_results = []
 
+# Output accumulator for QEMU serial output
+output_chunks = []
+output_lock = threading.Lock()
+qemu_process = None
+
 
 class TestResult:
     def __init__(self, name, suite, status, message=""):
@@ -43,7 +50,7 @@ class TestResult:
         self.suite = suite
         self.status = status  # "pass", "fail", "skip"
         self.message = message
-        self.timestamp = datetime.utcnow().isoformat() + "Z"
+        self.timestamp = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def pass_test(name, suite, msg=""):
@@ -67,67 +74,127 @@ def skip_test(name, suite, msg=""):
     print(f"  [SKIP] {name} {msg}")
 
 
-def check_output(desc, pattern, suite, content):
+def get_output():
+    """Get accumulated serial output as a single string."""
+    with output_lock:
+        return ''.join(output_chunks)
+
+
+def wait_for(pattern, timeout_sec):
+    """Wait for a pattern to appear in the accumulated output.
+
+    Returns True if the pattern is found before the timeout.
+    """
+    deadline = time.time() + timeout_sec
+    while time.time() < deadline:
+        output = get_output()
+        if pattern in output:
+            return True
+        time.sleep(0.1)
+    return False
+
+
+def send_command(cmd):
+    """Send a command string to QEMU via stdin (serial input)."""
+    if qemu_process is None or qemu_process.poll() is not None:
+        return
+    try:
+        qemu_process.stdin.write((cmd + '\n').encode('utf-8'))
+        qemu_process.stdin.flush()
+    except (IOError, BrokenPipeError, OSError):
+        pass
+
+
+def check_output(desc, pattern, suite):
+    """Check if pattern exists in accumulated output."""
+    content = get_output()
     if pattern in content:
         pass_test(desc, suite)
     else:
         fail_test(desc, suite, f"pattern '{pattern}' not found")
 
 
-def check_output_not(desc, pattern, suite, content):
+def check_output_not(desc, pattern, suite):
+    """Check if pattern does NOT exist in accumulated output."""
+    content = get_output()
     if pattern not in content:
         pass_test(desc, suite)
     else:
         fail_test(desc, suite, f"pattern '{pattern}' found unexpectedly")
 
 
+def reader_thread(pipe):
+    """Read output from QEMU stdout in a background thread."""
+    global output_chunks
+    try:
+        while True:
+            chunk = pipe.read(4096)
+            if not chunk:
+                break
+            with output_lock:
+                output_chunks.append(chunk.decode('utf-8', errors='replace'))
+    except (ValueError, IOError, OSError):
+        pass
+
+
 # --- QEMU management ---
 def start_qemu(timeout=30):
-    """Start QEMU and wait for boot to complete."""
+    """Start QEMU with serial on stdio and wait for boot to complete.
+
+    Returns (qemu_process, content_string).  The process is used for
+    sending commands and must be terminated by the caller.
+    """
+    global qemu_process, output_chunks
+
     if not os.path.exists(ISO_PATH):
         print(f"ERROR: ISO not found at {ISO_PATH}")
         sys.exit(2)
 
-    if os.path.exists(LOG_FILE):
-        os.remove(LOG_FILE)
+    if shutil.which(QEMU_BIN) is None:
+        print(f"ERROR: QEMU not found: {QEMU_BIN}")
+        sys.exit(2)
+
+    # Reset output accumulator
+    output_chunks = []
 
     qemu = subprocess.Popen(
-        [
-            QEMU_BIN, "-m", QEMU_MEM, "-cdrom", ISO_PATH,
-            "-nographic", "-no-reboot",
-            "-serial", f"file:{LOG_FILE}",
-            "-display", "none",
-        ],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        [QEMU_BIN, "-m", QEMU_MEM, "-cdrom", ISO_PATH,
+         "-nographic", "-no-reboot",
+         "-monitor", "none", "-display", "none"],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        bufsize=0,
     )
+    qemu_process = qemu
     print(f"QEMU started (PID={qemu.pid})")
+
+    # Start background reader thread
+    reader = threading.Thread(target=reader_thread, args=(qemu.stdout,), daemon=True)
+    reader.start()
 
     # Wait for boot
     elapsed = 0
     while elapsed < timeout:
-        if os.path.exists(LOG_FILE):
-            with open(LOG_FILE, "r") as f:
-                content = f.read()
-            if "All Tests Passed" in content:
-                print("Boot complete (self-tests passed).")
-                return qemu, content
-            if "panic" in content:
-                print("WARNING: Kernel panic detected.")
-                return qemu, content
+        content = get_output()
+        if "All Tests Passed" in content:
+            print("Boot complete (self-tests passed).")
+            return qemu, content
+        if "panic" in content:
+            print("WARNING: Kernel panic detected.")
+            return qemu, content
         time.sleep(1)
         elapsed += 1
 
     print(f"WARNING: Boot timeout after {timeout}s.")
-    content = ""
-    if os.path.exists(LOG_FILE):
-        with open(LOG_FILE, "r") as f:
-            content = f.read()
+    content = get_output()
     return qemu, content
 
 
 def stop_qemu(qemu):
     """Stop QEMU gracefully."""
+    if qemu is None:
+        return
     if qemu.poll() is None:
         qemu.send_signal(signal.SIGTERM)
         try:
@@ -138,11 +205,8 @@ def stop_qemu(qemu):
 
 
 def read_log():
-    """Read the current log file content."""
-    if os.path.exists(LOG_FILE):
-        with open(LOG_FILE, "r") as f:
-            return f.read()
-    return ""
+    """Read the current accumulated output."""
+    return get_output()
 
 
 # --- Test suites ---
@@ -151,26 +215,13 @@ def run_syscall_tests(content):
     print("\n--- System Call Tests ---")
     suite = "syscall"
 
-    # Check for syscall subsystem initialization
-    check_output("syscall init", "SYSCALL/SYSRET", suite, content)
-
-    # Check for process creation
-    check_output("process creation", "create_task", suite, content)
-
-    # Check for file operations
-    check_output("VFS lookup", "vfs_lookup", suite, content)
-
-    # Check for pipe operations
-    check_output("pipe support", "pipe", suite, content)
-
-    # Check for signal support
-    check_output("signal support", "signal", suite, content)
-
-    # Check for sysfs
-    check_output("sysfs mounted", "sysfs", suite, content)
-
-    # Check for procfs
-    check_output("procfs available", "proc", suite, content)
+    check_output("syscall init", "SYSCALL/SYSRET", suite)
+    check_output("process creation", "create_task", suite)
+    check_output("VFS lookup", "vfs_lookup", suite)
+    check_output("pipe support", "pipe", suite)
+    check_output("signal support", "signal", suite)
+    check_output("sysfs mounted", "sysfs", suite)
+    check_output("procfs available", "proc", suite)
 
 
 def run_filesystem_tests(content):
@@ -178,26 +229,17 @@ def run_filesystem_tests(content):
     print("\n--- Filesystem Tests ---")
     suite = "filesystem"
 
-    # Check for VFS init
-    check_output("VFS init", "VFS", suite, content)
+    check_output("VFS init", "VFS", suite)
+    check_output("RamFS mounted", "RamFS", suite)
+    check_output("file read/write", "vfs_write", suite)
+    check_output("dentry cache", "dentry", suite)
+    check_output("inode operations", "inode", suite)
 
-    # Check for RamFS
-    check_output("RamFS mounted", "RamFS", suite, content)
-
-    # Check for file I/O
-    check_output("file read/write", "vfs_write", suite, content)
-
-    # Check for dentry cache
-    check_output("dentry cache", "dentry", suite, content)
-
-    # Check for inode operations
-    check_output("inode operations", "inode", suite, content)
-
-    # Check for FAT32 support
+    # FAT32: fail if not found, since it's a listed feature
     if "FAT32" in content:
         pass_test("FAT32 support", suite)
     else:
-        skip_test("FAT32 support", suite, "FAT32 not mounted")
+        fail_test("FAT32 support", suite, "FAT32 not mounted")
 
 
 def run_network_tests(content):
@@ -205,37 +247,33 @@ def run_network_tests(content):
     print("\n--- Network Tests ---")
     suite = "network"
 
-    # Check for network stack init
-    check_output("network stack init", "TCP/IP", suite, content)
+    check_output("network stack init", "TCP/IP", suite)
 
-    # Check for DHCP client
+    # DHCP: fail if not found, since dhcp_init should be called at boot
     if "dhcp" in content.lower():
         pass_test("DHCP client", suite)
     else:
-        skip_test("DHCP client", suite, "DHCP not initialized")
+        fail_test("DHCP client", suite, "DHCP not initialized")
 
-    # Check for DNS resolver
+    # DNS: fail if not found
     if "dns" in content.lower():
         pass_test("DNS resolver", suite)
     else:
-        skip_test("DNS resolver", suite, "DNS not available")
+        fail_test("DNS resolver", suite, "DNS not available")
 
-    # Check for HTTP client
+    # HTTP: fail if not found
     if "http" in content.lower():
         pass_test("HTTP client", suite)
     else:
-        skip_test("HTTP client", suite, "HTTP not available")
+        fail_test("HTTP client", suite, "HTTP not available")
 
-    # Check for ARP
-    check_output("ARP support", "ARP", suite, content)
+    check_output("ARP support", "ARP", suite)
 
-    # Check for ICMP
     if "ICMP" in content or "icmp" in content.lower():
         pass_test("ICMP support", suite)
     else:
         skip_test("ICMP support", suite, "ICMP not in log")
 
-    # Check for TCP
     if "TCP" in content:
         pass_test("TCP support", suite)
     else:
@@ -247,11 +285,11 @@ def run_memory_tests(content):
     print("\n--- Memory Tests ---")
     suite = "memory"
 
-    check_output("buddy allocator", "Buddy", suite, content)
-    check_output("slab allocator", "Slab", suite, content)
-    check_output("page tables", "Page Table", suite, content)
-    check_output("physical memory", "Physical memory", suite, content)
-    check_output("ASLR", "ASLR", suite, content)
+    check_output("buddy allocator", "Buddy", suite)
+    check_output("slab allocator", "Slab", suite)
+    check_output("page tables", "Page Table", suite)
+    check_output("physical memory", "Physical memory", suite)
+    check_output("ASLR", "ASLR", suite)
 
 
 def run_scheduler_tests(content):
@@ -259,9 +297,9 @@ def run_scheduler_tests(content):
     print("\n--- Scheduler Tests ---")
     suite = "scheduler"
 
-    check_output("scheduler init", "Scheduler", suite, content)
-    check_output("round-robin", "RR", suite, content)
-    check_output("task creation", "create_task", suite, content)
+    check_output("scheduler init", "Scheduler", suite)
+    check_output("round-robin", "RR", suite)
+    check_output("task creation", "create_task", suite)
 
     if "SMP" in content:
         pass_test("SMP support", suite)
@@ -273,7 +311,7 @@ def generate_report():
     """Generate a JSON test report."""
     report = {
         "title": "AuroraOS Regression Test Report",
-        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "summary": {
             "total": pass_count + fail_count + skip_count,
             "passed": pass_count,
@@ -309,15 +347,15 @@ def main():
     args = parser.parse_args()
 
     print("=== AuroraOS Regression Tests ===")
-    print(f"Time: {datetime.utcnow().isoformat()}Z")
+    print(f"Time: {datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')}")
     print("")
 
+    qemu = None
+
     if args.report_only:
-        if os.path.exists(LOG_FILE):
-            with open(LOG_FILE, "r") as f:
-                content = f.read()
-        else:
-            print(f"ERROR: Log file not found: {LOG_FILE}")
+        content = get_output()
+        if not content:
+            print("ERROR: No accumulated output available for --report-only")
             sys.exit(2)
     else:
         qemu, content = start_qemu(timeout=args.timeout)

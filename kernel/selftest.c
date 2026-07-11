@@ -761,20 +761,24 @@ static void test_http_parse(void) {
     if (HTTP_DEFAULT_PORT != 80) TEST_FAIL("HTTP_DEFAULT_PORT != 80");
     TEST_PASS("HTTP default port");
 
-    /* Test HTTP URL parsing edge cases */
-    /* Verify that http_get is callable with NULL inputs (should return error) */
+    /* Test that http_get with NULL URL returns error */
     int ret = http_get(NULL, NULL, 0);
     if (ret != -1) {
-        /* May return -1 for error, 0 for success in some impls */
+        TEST_FAIL("HTTP NULL URL should return -1");
+    } else {
+        TEST_PASS("HTTP NULL URL rejected");
     }
-    TEST_PASS("HTTP NULL URL rejected");
 
-    /* Test with a well-formed URL */
+    /* Test with a well-formed URL - verify the function doesn't crash */
     char buf[256];
     memset(buf, 0, sizeof(buf));
-    /* This may fail in QEMU (no network), but the function should not crash */
-    http_get("http://example.com/", buf, sizeof(buf));
-    TEST_PASS("HTTP GET attempt (no crash)");
+    ret = http_get("http://example.com/", buf, sizeof(buf));
+    /* In QEMU without network, http_get should return an error code, not crash */
+    if (ret == 0 || ret == -1) {
+        TEST_PASS("HTTP GET attempt (no crash, returned as expected)");
+    } else {
+        TEST_FAIL("HTTP GET returned unexpected value");
+    }
 }
 
 /* ================================================================

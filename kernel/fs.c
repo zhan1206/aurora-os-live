@@ -28,6 +28,7 @@
 #include "sysfs.h"
 #include "journal.h"
 #include "fsck.h"
+#include "squashfs.h"
 
 /* ================================================================
  * Journal configuration
@@ -135,6 +136,19 @@ void fs_init(void) {
                 int pid = exec_elf("/hello");
                 log_printf(LOG_LEVEL_INFO, "fs: exec_elf returned pid=%d\n", pid);
             }
+
+            /* Try to mount squashfs if available */
+            {
+                struct block_device *sq_bdev = block_dev_find("squashfs0");
+                if (sq_bdev) {
+                    struct super_block *sq_sb = squashfs_mount(sq_bdev);
+                    if (sq_sb) {
+                        if (vfs_mount("/squashfs", sq_sb) == 0) {
+                            log_printf(LOG_LEVEL_INFO, "fs: squashfs mounted at /squashfs\n");
+                        }
+                    }
+                }
+            }
             return;
         }
         log_printf(LOG_LEVEL_WARN, "fs: ext2 mount from ramdisk0 failed, falling back to ramfs\n");
@@ -162,6 +176,19 @@ void fs_init(void) {
             log_printf(LOG_LEVEL_INFO, "fs: Found /hello in ramfs, attempting exec\n");
             int pid = exec_elf("/hello");
             log_printf(LOG_LEVEL_INFO, "fs: exec_elf returned pid=%d\n", pid);
+        }
+
+        /* Try to mount squashfs if available */
+        {
+            struct block_device *sq_bdev = block_dev_find("squashfs0");
+            if (sq_bdev) {
+                struct super_block *sq_sb = squashfs_mount(sq_bdev);
+                if (sq_sb) {
+                    if (vfs_mount("/squashfs", sq_sb) == 0) {
+                        log_printf(LOG_LEVEL_INFO, "fs: squashfs mounted at /squashfs\n");
+                    }
+                }
+            }
         }
     }
 }

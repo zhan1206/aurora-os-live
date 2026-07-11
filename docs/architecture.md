@@ -1,10 +1,10 @@
-﻿﻿﻿﻿﻿﻿﻿﻿# AuroraOS 系统架构设计文档
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿# AuroraOS 系统架构设计文档
 
 ## 1. 概述
 
 AuroraOS 是一个基于 x86_64 架构的自主研发操作系统内核，采用混合内核（Hybrid Kernel）设计，支持多任务调度、虚拟内存管理、虚拟文件系统、POSIX 信号机制、ELF 可执行文件加载、SMP 多核、动态模块加载和硬件性能监控。
 
-- **版本**: 4.0.0
+- **版本**: 4.0.1
 - **目标架构**: x86_64 (AMD64)
 - **内核类型**: 混合内核（宏内核 + 可加载模块）
 - **启动方式**: Multiboot1 (GRUB2) / UEFI
@@ -397,9 +397,9 @@ ASLR 随机化:
 
 ## 9. 未来规划
 
-> **v4.0.0 里程碑 (2026-07-11)**: 紧急+短期+中期+长期规划中所有功能已全面实现。PIE 支持、DHCP/DNS/HTTP 客户端、FAT32 LFN + squashfs、红黑树调度器、抢占式调度、NVMe 驱动、riscv64/aarch64/loongarch64 多架构、TCP 拥塞控制 + IPv6、用户态 ELF、75+ POSIX 系统调用、DRM/KMS 框架、模块独立编译、26 组自测试、冒烟测试、回归测试框架全部完成。
+> **v4.0.0 里程碑 (2026-07-11)**: 主要功能已实现。PIE 支持、DHCP/DNS/HTTP 客户端、FAT32 LFN + squashfs、红黑树调度器、抢占式调度、NVMe 驱动、TCP 拥塞控制 + IPv6、用户态 ELF、75+ POSIX 系统调用、DRM/KMS 框架、模块独立编译、26 组自测试、冒烟测试、回归测试框架已集成。多架构代码已准备但未集成到构建系统。
 
-### 已完成的 v4.0.0 里程碑（全部完成）
+### v4.0.0 里程碑 — 已集成功能
 - ✅ **PIE 支持**: 6 种重定位类型（R_X86_64_RELATIVE/GLOB_DAT/JUMP_SLOT/64/PC32/IRELATIVE），ASLR 随机基址，argv/envp 传递
 - ✅ **DHCP 客户端**: 完整 RFC 2131 状态机（DISCOVER→OFFER→REQUEST→ACK），自动 IP/掩码/网关/DNS 配置
 - ✅ **DNS 解析器**: UDP A 记录查询，16 条目缓存，名称压缩指针支持
@@ -409,7 +409,6 @@ ASLR 随机化:
 - ✅ **红黑树调度器**: O(log n) 就绪队列，per-CPU rbtree，vruntime 排序
 - ✅ **抢占式调度**: 10ms 时间片，preempt_disable/enable 嵌套保护，schedule_tick()
 - ✅ **NVMe 驱动**: PCI 枚举，Admin/IO 队列，PRP 列表，MSI-X，块设备集成
-- ✅ **多架构** (riscv64/aarch64/loongarch64): Sv39/ARM/LoongArch 页表，SBI/GIC/CSR，上下文切换，启动入口
 - ✅ **TCP 拥塞控制**: TCP Reno（慢启动/拥塞避免/快速重传/快速恢复），RTT 估算，窗口缩放
 - ✅ **IPv6**: 链路本地地址（EUI-64），NDP 邻居发现，ICMPv6 Echo
 - ✅ **用户态 ELF**: auxv 向量，用户栈设置，16 字节对齐
@@ -417,6 +416,10 @@ ASLR 随机化:
 - ✅ **DRM/KMS**: 帧缓冲管理，8×16 字体，双缓冲 flip，GOP 集成
 - ✅ **模块独立编译**: .km 格式，版本检查，依赖检查，Makefile 模板
 - ✅ **自测试**: 26 组测试（14→26），冒烟测试，回归测试框架（5 套件）
+
+### v4.0.0 里程碑 — 部分完成功能
+
+- ⚠️ **多架构** (riscv64/aarch64/loongarch64): 代码已准备但未集成到构建系统。Sv39/ARM/LoongArch 页表、SBI/GIC/CSR、上下文切换、启动入口等代码已编写，但尚未能在 QEMU 和真实硬件上实际启动。
 
 ### 下一阶段（v5.0）
 - **完整 POSIX 兼容层**: 运行 Linux 静态链接二进制文件

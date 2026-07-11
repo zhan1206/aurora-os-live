@@ -417,7 +417,7 @@ int ipv6_recv(void *buf, int max_len, ipv6_addr_t *src, ipv6_addr_t *dst) {
 /* ================================================================
  * IPv6 Packet Handler (called from Ethernet layer)
  * ================================================================ */
-static void ipv6_handle_packet(struct net_device *netdev,
+void ipv6_handle_packet(struct net_device *netdev,
                                 const uint8_t *data, int len) {
     (void)netdev;
     if (len < (int)sizeof(struct ipv6_hdr)) return;

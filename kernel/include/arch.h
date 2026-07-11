@@ -2,8 +2,8 @@
  * arch.h - Architecture abstraction layer
  *
  * Provides architecture-independent macros and inline functions.
- * Currently only x86_64 is actively compiled; riscv64, aarch64, and
- * loongarch64 headers are provided for future multi-arch support.
+ * x86_64 is the primary build target; multi-architecture code for
+ * riscv64, aarch64, and loongarch64 is prepared.
  *
  * The ARCH_* macros are set by the build system (-D flag).  When no
  * architecture is specified, x86_64 is assumed as the default.
