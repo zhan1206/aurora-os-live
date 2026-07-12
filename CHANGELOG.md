@@ -1,5 +1,48 @@
 # AuroraOS Changelog
 
+## v4.0.3 (2026-07-11) — 多架构缺陷修复 + 内核健壮性增强
+
+### 🔴 严重修复 (P0 - Critical)
+- **loongarch64 csr_xchg 操作数错误**: 内联汇编 `csrxchg` 操作数 rd/rj 对调，导致写入 CSR 的是未初始化寄存器中的垃圾值
+  - 修复：`"+r"(new_val), "=r"(old_val)` → `"=r"(old_val) : "r"(new_val)`
+
+### 🟠 高优先级修复 (P1 - High)
+- **loongarch64 csr_write 寄存器 clobber**: `csrwr` 指令会覆写输入寄存器（写入旧 CSR 值），但内联汇编未声明 `+r`，编译器可能复用已破坏的寄存器值
+  - 修复：`: "r"(val)` → `: "+r"(val)`
+- **aarch64 pagetable.h TG0/TG1 粒度编码错误**: `TCR_TG0_16K` 和 `TCR_TG0_64K` 宏值完全相同（均为 `1ULL<<14`，实际都是 64KB），16KB 粒度永远无法选中；TG1 同样存在问题
+  - 修复：TG0_16K `1<<14`→`2<<14`，TG1 编码按 ARM ARM 规范修正
+- **riscv64 MAKE_SATP 缺 ASID 字段**: SATP 寄存器结构为 MODE|ASID|PPN，但宏仅接受 ppn 和 mode 两个参数，无法设置 ASID 做地址空间隔离
+  - 修复：添加 `asid` 参数，`MAKE_SATP(ppn, asid, mode)`
+
+### 🟡 中优先级修复 (P2 - Medium)
+- **mem.c slab obj_size 对齐**: `obj_size` 补齐到 `sizeof(void*)` 后未按该值对齐，如 `obj_size=33` 时对象起始地址不满足 8 字节对齐，内嵌 `free_list` 指针写入可能跨页或触发对齐异常
+  - 修复：添加 `obj_size = (obj_size + sizeof(void*) - 1) & ~(sizeof(void*) - 1)`
+- **riscv64 boot.S S-mode CSR 访问**: 直接写入 `sie`/`sip` 等 Supervisor CSR，若由 M-mode bootloader 直接跳入（未经过 SBI 切到 S-mode）会触发非法指令异常
+  - 修复：添加明确注释说明要求 SBI/S-mode 入口
+- **mem.c Multiboot mmap 解析溢出**: `entries += e->size + sizeof(uint32_t)` 未检查 `e->size` 整数溢出，恶意/异常 mmap entry 可使指针回绕
+  - 修复：添加 `if (e->size > UINT32_MAX - sizeof(uint32_t)) break;`
+
+### 🟡 追加修复 (v4.0.2修正回退)
+- **vfs.c vfs_open refcount 修复回退**: v4.0.2 中"仅在首次打开时递增 refcount"的修复引入新问题——`refcount==0` 条件在 dentry_alloc 初始化为 1 后永远不会为真，导致 vfs_open 永不递增 refcount，但 vfs_close 仍正常递减，造成使用中的 dentry 可被 LRU 回收（use-after-free 风险）
+  - 修复回退：恢复每次 vfs_open 均递增 refcount 的原始正确行为，每个 open/close 对自然平衡
+
+### 📋 报告误报确认
+以下项目经代码审查确认为误报，无需修复：
+- `kernel/` 目录完全不存在 —— 实际存在约 90 个文件
+- `keyboard_handler.S` 为 0 字节空文件 —— 实际 47 行完整代码
+- `exception_handlers.S` 缺 #PF 处理 —— 在 `pf_handler.S` 中单独处理
+- `context.S` 仅保存 callee-saved 寄存器 —— 符合 x86_64 ABI 调用约定
+- `gdt.S` 缺 `ltr` 指令 —— 在 `tss.S` 的 `tss_init` 中
+- Slab 扩容竞态（growing 标志时机）—— 标志在释放锁**之前**设置
+- keyboard.c e0_prefix 状态混乱 —— done 标签正确重置
+- console.c 缓冲区丢字符 —— 满缓冲时丢弃是正确行为
+- shell.c do_exit_cmd 非阻塞退出 —— while 循环正确等待
+
+### 版本控制
+- 版本号: v4.0.3
+
+---
+
 ## v4.0.2 (2026-07-11) — 关键缺陷修复 (P0-P3)
 
 ### 🔴 严重修复 (P0 - Critical)

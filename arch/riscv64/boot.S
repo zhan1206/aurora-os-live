@@ -10,6 +10,11 @@
     .type _start, @function
 
 _start:
+    /* FIXED: This boot stub assumes S-mode entry via OpenSBI/SBI.
+     * Direct M-mode entry without SBI will cause illegal instruction
+     * exceptions on the S-mode CSR accesses below. For M-mode boot,
+     * a proper SBI shim (mret to S-mode) is required before this code. */
+
     /* Disable interrupts */
     csrw sie, zero
     csrw sip, zero

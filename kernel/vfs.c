@@ -452,9 +452,13 @@ struct file *vfs_open(const char *path, int flags) {
     }
 
     /* Increment dentry refcount to prevent eviction while this file
-     * is open. Only increment on first open (refcount==0) to prevent
-     * reference count leak when same file is opened multiple times. */
-    if (inode->dentry && inode->dentry->refcount == 0) {
+     * is open. Each vfs_open increments refcount by 1; vfs_close
+     * decrements it when the last file reference is dropped. This
+     * ensures dentry stays in cache while any file is open.
+     * FIXED: reverted incorrect condition (refcount==0 is never true
+     * since dentry_alloc initializes to 1). The original simple
+     * increment was correct — each open/close pair balances. */
+    if (inode->dentry) {
         inode->dentry->refcount++;
     }
 

@@ -393,7 +393,9 @@ void phys_mem_init(void *mb_info) {
 
                     /* Multiboot1 spec: entry->size is the size of the data
                      * portion (excluding the size field itself).
-                     * Total entry size = size + sizeof(uint32_t). */
+                     * Total entry size = size + sizeof(uint32_t).
+                     * FIXED: guard against integer overflow in size field. */
+                    if (e->size > UINT32_MAX - sizeof(uint32_t)) break;
                     entries += e->size + sizeof(uint32_t);
                 }
 
@@ -717,8 +719,11 @@ static int slab_grow(struct slab_cache *cache) {
     uint8_t *base = (uint8_t*)page;
     size_t obj_size = cache->obj_size;
 
-    /* Align obj_size to at least sizeof(void*) for intrusive free list */
+    /* Align obj_size to at least sizeof(void*) and to its multiple
+     * for intrusive free list pointer alignment. FIXED: obj_size=33
+     * would cause misaligned writes to the free_list pointer. */
     if (obj_size < sizeof(void*)) obj_size = sizeof(void*);
+    obj_size = (obj_size + sizeof(void*) - 1) & ~(sizeof(void*) - 1);
 
     /* Carve page into objects, link them into free list */
     for (size_t i = 0; i + obj_size <= PAGE_SIZE; i += obj_size) {

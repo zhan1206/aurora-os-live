@@ -67,10 +67,13 @@
 #define TCR_T0SZ_SHIFT          0
 #define TCR_T1SZ_SHIFT          16
 #define TCR_TG0_4K              (0ULL << 14)   /* TTBR0 granule: 4 KiB */
-#define TCR_TG0_16K             (1ULL << 14)   /* TTBR0 granule: 16 KiB */
+/* FIXED: TG0/TG1 encoding per ARM ARM:
+ * TG0[15:14]: 00=4KB, 01=64KB, 10=16KB
+ * TG1[31:30]: 10=4KB, 01=16KB, 11=64KB (when TG0=4KB) */
+#define TCR_TG0_16K             (2ULL << 14)   /* TTBR0 granule: 16 KiB */
 #define TCR_TG0_64K             (1ULL << 14)   /* TTBR0 granule: 64 KiB */
 #define TCR_TG1_4K              (2ULL << 30)   /* TTBR1 granule: 4 KiB */
-#define TCR_TG1_16K             (1ULL << 30)   /* TTBR1 granule: 16 KiB */
+#define TCR_TG1_16K             (1ULL << 30)   /* TTBR1 granule: 16 KiB (when TG0=4KB) */
 #define TCR_TG1_64K             (3ULL << 30)   /* TTBR1 granule: 64 KiB */
 #define TCR_IRGN0_NC            (0ULL << 8)
 #define TCR_IRGN0_WB            (1ULL << 8)

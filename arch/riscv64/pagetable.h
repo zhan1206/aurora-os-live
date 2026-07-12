@@ -51,9 +51,11 @@
 #define VPN2_SHIFT      30
 #define VPN_MASK        0x1FF
 
-/* Helper: build SATP value from root page table PPN and mode */
-#define MAKE_SATP(ppn, mode) \
-    ((mode) | ((ppn) & SATP_PPN_MASK))
+/* Helper: build SATP value from root page table PPN, ASID, and mode
+ * SATP register: MODE(4 bits @60) | ASID(16 bits @44) | PPN(44 bits @0)
+ * FIXED: added ASID parameter for address space isolation */
+#define MAKE_SATP(ppn, asid, mode) \
+    ((mode) | (((uint64_t)(asid) << SATP_ASID_SHIFT) & 0xFFFFULL << SATP_ASID_SHIFT) | ((ppn) & SATP_PPN_MASK))
 
 /* Helper: set SATP register */
 static inline void satp_write(uint64_t satp_val) {

@@ -133,17 +133,23 @@ static inline uint64_t csr_read(uint32_t csr_num) {
     return val;
 }
 
-/* CSR write */
+/* CSR write
+ * FIXED: csrwr modifies the register (writes old CSR value back).
+ * Use "+r" to tell the compiler the register is both read and written. */
 static inline void csr_write(uint32_t csr_num, uint64_t val) {
-    asm volatile ("csrwr %0, %1" : : "r"(val), "i"(csr_num) : "memory");
+    asm volatile ("csrwr %0, %1" : "+r"(val) : "i"(csr_num) : "memory");
 }
 
-/* CSR exchange (read-modify-write) */
+/* CSR exchange (read-modify-write)
+ * csrxchg rd, rj, csr_num:
+ *   rd = old CSR value, CSR = rj
+ * FIXED: operand order was swapped — %1 (old_val) was output-only
+ * but was being written to the CSR, causing garbage CSR writes. */
 static inline uint64_t csr_xchg(uint32_t csr_num, uint64_t new_val) {
     uint64_t old_val;
     asm volatile ("csrxchg %0, %1, %2"
-        : "+r"(new_val), "=r"(old_val)
-        : "i"(csr_num)
+        : "=r"(old_val)
+        : "r"(new_val), "i"(csr_num)
         : "memory");
     return old_val;
 }
