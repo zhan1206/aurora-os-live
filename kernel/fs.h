@@ -51,7 +51,11 @@ struct dentry {
     struct dentry   *lru_next; /* LRU list: next entry */
     int              refcount;
     int              access_count; /* access count for LRU aging */
+    int              flags;    /* DENTRY_FLAG_* bitmask */
 };
+
+/* Dentry flags */
+#define DENTRY_FLAG_MOUNT 0x01  /* dentry is a mount point; inode is sb->root */
 
 /* File open flags */
 #define O_RDONLY  0

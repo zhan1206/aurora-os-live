@@ -129,7 +129,13 @@ void panic(const char *fmt, ...) {
                     char tmp[16];
                     int tn = itoa(v, tmp, sizeof(tmp));
                     for (int i = 0; i < tn && n < 250; i++) buf[n++] = tmp[i];
-                } else { buf[n++] = '%'; if (*p) buf[n++] = *p; }
+                } else {
+                    /* Handle trailing '%' or unknown format specifier:
+                     * print the '%' literally, and if *p is not '\0',
+                     * print the character after it as well. */
+                    buf[n++] = '%';
+                    if (*p) buf[n++] = *p;
+                }
                 if (*p) p++;
             } else {
                 buf[n++] = *p++;
@@ -184,7 +190,8 @@ void panic(const char *fmt, ...) {
             uint64_t *next_rbp = (uint64_t *)*rbp_ptr;
             uint64_t ret_addr = *(rbp_ptr + 1);
 
-            if (!next_rbp || ret_addr < 0x100000 || ret_addr > 0xFFFFFFFF) break;
+            /* Sanity check: kernel code starts at 1MB, no upper bound needed for 64-bit */
+            if (!next_rbp || ret_addr < 0x100000) break;
 
             console_write_ansi(PANIC_LABEL_FG);
             console_write("       #");

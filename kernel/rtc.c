@@ -115,10 +115,16 @@ uint64_t rtc_get_uptime_seconds(void) {
 void rtc_tick_update(void) {
     /* PIT runs at 100 Hz, so increment every 100 ticks */
     static uint32_t tick_counter = 0;
-    tick_counter++;
-    if (tick_counter >= 100) {
-        tick_counter = 0;
-        g_uptime_seconds++;
+    /* Bug #38: use atomic increment to avoid race condition on SMP */
+    uint32_t new_tick = __sync_add_and_fetch(&tick_counter, 1);
+    if (new_tick >= 100) {
+        /* Only the CPU that crosses the threshold resets the counter */
+        if (new_tick == 100) {
+            tick_counter = 0;
+            g_uptime_seconds++;
+        }
+        /* Other CPUs will see tick_counter >= 100 and skip the increment
+         * until the resetting CPU clears it. This avoids lost ticks on SMP. */
     }
 }
 

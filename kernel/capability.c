@@ -66,6 +66,7 @@ int cap_fd_alloc(struct task_struct *t, void *filp, uint32_t caps) {
 
     struct cap_entry *entry = (struct cap_entry *)kmalloc(sizeof(*entry));
     if (!entry) return -1;
+    entry->magic = CAP_ENTRY_MAGIC;  /* Bug #13: set magic for type-safety check */
     entry->file = filp;
     entry->caps = caps;
 
@@ -84,7 +85,11 @@ int cap_fd_alloc(struct task_struct *t, void *filp, uint32_t caps) {
 static struct cap_entry *cap_get(struct task_struct *t, int fd) {
     if (!t || fd < 0 || fd >= MAX_FDS) return NULL;
     if (t->fd_table[fd] == (uintptr_t)-1) return NULL;
-    return (struct cap_entry *)t->fd_table[fd];
+
+    /* Bug #13: verify magic to prevent type confusion with raw file pointers */
+    struct cap_entry *entry = (struct cap_entry *)t->fd_table[fd];
+    if (entry->magic != CAP_ENTRY_MAGIC) return NULL;
+    return entry;
 }
 
 /* Get the file pointer for an fd */
@@ -110,9 +115,13 @@ void cap_fd_close_all(struct task_struct *t) {
     for (int i = 0; i < MAX_FDS; ++i) {
         if (t->fd_table[i] != (uintptr_t)-1) {
             struct cap_entry *entry = (struct cap_entry *)t->fd_table[i];
+            /* Bug #13: skip non-cap entries (raw file pointers from fd_* system) */
+            if (entry->magic != CAP_ENTRY_MAGIC) continue;
+            /* Invalidate the fd_table entry first to prevent UAF if a
+             * callback during vfs_close accesses the fd_table. */
+            t->fd_table[i] = (uintptr_t)-1;
             vfs_close((struct file *)entry->file);
             kfree(entry);
-            t->fd_table[i] = (uintptr_t)-1;
         }
     }
 }

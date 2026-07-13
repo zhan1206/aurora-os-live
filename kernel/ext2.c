@@ -383,6 +383,58 @@ static uint32_t ext2_alloc_inode(struct ext2_sb_info *sbi) {
     return 0;
 }
 
+/*
+ * Free an allocated block (used for cleanup on error paths).
+ */
+static void ext2_free_block(struct ext2_sb_info *sbi, uint32_t blk) {
+    if (blk == 0) return;
+    uint32_t group = (blk - sbi->first_data_block) / sbi->blocks_per_group;
+    uint32_t index = (blk - sbi->first_data_block) % sbi->blocks_per_group;
+    if (group >= sbi->num_groups) return;
+
+    uint32_t bitmap_block = sbi->gd[group].bg_block_bitmap;
+    uint8_t *bitmap = (uint8_t *)kmalloc(sbi->block_size);
+    if (!bitmap) return;
+
+    if (read_block(sbi->bdev, sbi->block_size, bitmap_block, bitmap) < 0) {
+        kfree(bitmap);
+        return;
+    }
+
+    uint32_t byte_idx = index / 8;
+    uint32_t bit_idx  = index % 8;
+    bitmap[byte_idx] &= (uint8_t)~(1u << bit_idx);
+    write_block(sbi->bdev, sbi->block_size, bitmap_block, bitmap);
+    sbi->gd[group].bg_free_blocks_count++;
+    kfree(bitmap);
+}
+
+/*
+ * Free an allocated inode (used for cleanup on error paths).
+ */
+static void ext2_free_inode(struct ext2_sb_info *sbi, uint32_t ino) {
+    if (ino == 0) return;
+    uint32_t group = (ino - 1) / sbi->inodes_per_group;
+    uint32_t index = (ino - 1) % sbi->inodes_per_group;
+    if (group >= sbi->num_groups) return;
+
+    uint32_t bitmap_block = sbi->gd[group].bg_inode_bitmap;
+    uint8_t *bitmap = (uint8_t *)kmalloc(sbi->block_size);
+    if (!bitmap) return;
+
+    if (read_block(sbi->bdev, sbi->block_size, bitmap_block, bitmap) < 0) {
+        kfree(bitmap);
+        return;
+    }
+
+    uint32_t byte_idx = index / 8;
+    uint32_t bit_idx  = index % 8;
+    bitmap[byte_idx] &= (uint8_t)~(1u << bit_idx);
+    write_block(sbi->bdev, sbi->block_size, bitmap_block, bitmap);
+    sbi->gd[group].bg_free_inodes_count++;
+    kfree(bitmap);
+}
+
 /* ================================================================
  * VFS file operations for ext2 files
  * ================================================================ */
@@ -498,7 +550,11 @@ static ssize_t ext2_file_write(struct file *filp, const void *buf, size_t count,
         info->raw.i_size = (uint32_t)(*offset);
 
     /* Write updated inode back to disk */
-    ext2_write_inode_raw(sbi, info->inode_num, &info->raw);
+    int ret = ext2_write_inode_raw(sbi, info->inode_num, &info->raw);
+    if (ret < 0) {
+        log_printf(LOG_LEVEL_ERR, "ext2: write_inode_raw failed for inode %u (ret=%d)\n",
+                   info->inode_num, ret);
+    }
 
     kfree(block_buf);
     return (ssize_t)total_written;
@@ -780,8 +836,12 @@ struct inode *ext2_create(struct super_block *sb, struct inode *dir,
     /* name_len is uint8_t, so < 256 always; check if name is too long via strlen */
     if (strlen(name) > 255) return NULL;
 
+    uint32_t new_ino = 0;
+    uint32_t new_blk = 0;
+    uint8_t *block_buf = NULL;
+
     /* Allocate a new inode */
-    uint32_t new_ino = ext2_alloc_inode(sbi);
+    new_ino = ext2_alloc_inode(sbi);
     if (new_ino == 0) return NULL;
 
     /* Initialize the new inode on disk */
@@ -794,13 +854,13 @@ struct inode *ext2_create(struct super_block *sb, struct inode *dir,
     new_raw.i_blocks = 0;
     new_raw.i_links_count = 1;
 
-    if (ext2_write_inode_raw(sbi, new_ino, &new_raw) < 0) return NULL;
+    if (ext2_write_inode_raw(sbi, new_ino, &new_raw) < 0) goto out_free_inode;
 
     /* Add a directory entry in the parent directory */
     uint32_t dir_size = dir_info->raw.i_size;
     uint16_t new_rec_len = rec_len_for_name(name_len);
-    uint8_t *block_buf = (uint8_t *)kmalloc(block_size);
-    if (!block_buf) return NULL;
+    block_buf = (uint8_t *)kmalloc(block_size);
+    if (!block_buf) goto out_free_inode;
 
     int found_slot = 0;
     uint32_t new_offset = dir_size;
@@ -814,8 +874,7 @@ struct inode *ext2_create(struct super_block *sb, struct inode *dir,
             if (read_block(sbi->bdev, block_size,
                            dir_info->raw.i_block[last_block_idx],
                            block_buf) < 0) {
-                kfree(block_buf);
-                return NULL;
+                goto out_free_inode;
             }
 
             /* Scan the last block for a slot */
@@ -859,15 +918,9 @@ struct inode *ext2_create(struct super_block *sb, struct inode *dir,
 
         if (blk_off == 0) {
             /* Need a new block */
-            uint32_t new_blk = ext2_alloc_block(sbi);
-            if (new_blk == 0) {
-                kfree(block_buf);
-                return NULL;
-            }
-            if (blk_idx >= EXT2_NDIR_BLOCKS) {
-                kfree(block_buf);
-                return NULL;
-            }
+            new_blk = ext2_alloc_block(sbi);
+            if (new_blk == 0) goto out_free_inode;
+            if (blk_idx >= EXT2_NDIR_BLOCKS) goto out_free_block;
             dir_info->raw.i_block[blk_idx] = new_blk;
             dir_info->raw.i_blocks += (block_size / 512);
             memset(block_buf, 0, block_size);
@@ -875,8 +928,7 @@ struct inode *ext2_create(struct super_block *sb, struct inode *dir,
             /* Read the existing block */
             if (read_block(sbi->bdev, block_size,
                            dir_info->raw.i_block[blk_idx], block_buf) < 0) {
-                kfree(block_buf);
-                return NULL;
+                goto out_free_inode;
             }
         }
 
@@ -905,6 +957,13 @@ struct inode *ext2_create(struct super_block *sb, struct inode *dir,
 
     /* Build the VFS inode for the new file */
     return ext2_read_inode(sb, new_ino);
+
+out_free_block:
+    ext2_free_block(sbi, new_blk);
+out_free_inode:
+    ext2_free_inode(sbi, new_ino);
+    kfree(block_buf);
+    return NULL;
 }
 
 /* ================================================================

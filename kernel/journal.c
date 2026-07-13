@@ -23,6 +23,7 @@
 #include "block_dev.h"
 #include "include/log.h"
 #include "include/print.h"
+#include "smp.h"
 #include "mem.h"
 #include <string.h>
 
@@ -31,6 +32,7 @@
  * ================================================================ */
 static struct journal_handle g_journal;
 static int g_journal_initialized = 0;
+static spinlock_t journal_lock = {0};
 
 /* ================================================================
  * Internal helpers
@@ -103,7 +105,10 @@ static void free_transaction(void) {
     }
     g_journal.txn_blocks = 0;
     g_journal.txn_capacity = 0;
+    /* Protect in_transaction clear with spinlock to pair with journal_begin */
+    spin_lock(&journal_lock);
     g_journal.in_transaction = 0;
+    spin_unlock(&journal_lock);
 }
 
 /*
@@ -208,10 +213,31 @@ int journal_init(struct block_device *bdev, uint64_t journal_start,
 
 int journal_begin(uint32_t max_blocks) {
     if (!g_journal_initialized) return -1;
-    if (g_journal.in_transaction) return -1;
+
+    /* Protect in_transaction check-and-set to prevent race conditions */
+    spin_lock(&journal_lock);
+    if (g_journal.in_transaction) {
+        spin_unlock(&journal_lock);
+        return -1;
+    }
+    g_journal.in_transaction = 1;
+    spin_unlock(&journal_lock);
 
     if (max_blocks == 0) max_blocks = 1;
-    if (max_blocks > 64) max_blocks = 64; /* practical limit */
+
+    /*
+     * BUGFIX: The descriptor block must fit within a single block_size buffer.
+     * It contains a journal_block_header (36 bytes) followed by
+     * journal_data_block entries (20 bytes each).  Hardcoding 64 entries
+     * would overflow the buffer when block_size < 1316 bytes.
+     * Calculate the actual maximum based on the filesystem block size.
+     *   max_blocks = (block_size - sizeof(struct journal_block_header))
+     *              / sizeof(struct journal_data_block)
+     * For block_size=1024: (1024-36)/20 = 49 entries max.
+     */
+    uint32_t desc_capacity = (g_journal.block_size - sizeof(struct journal_block_header))
+                           / sizeof(struct journal_data_block);
+    if (max_blocks > desc_capacity) max_blocks = desc_capacity;
 
     g_journal.txn_fs_blocks = (uint32_t *)kmalloc(max_blocks * sizeof(uint32_t));
     g_journal.txn_data = (uint8_t **)kmalloc(max_blocks * sizeof(uint8_t *));
@@ -220,6 +246,10 @@ int journal_begin(uint32_t max_blocks) {
         if (g_journal.txn_data) kfree(g_journal.txn_data);
         g_journal.txn_fs_blocks = NULL;
         g_journal.txn_data = NULL;
+        /* Clear in_transaction on allocation failure */
+        spin_lock(&journal_lock);
+        g_journal.in_transaction = 0;
+        spin_unlock(&journal_lock);
         return -1;
     }
 
@@ -227,7 +257,6 @@ int journal_begin(uint32_t max_blocks) {
     memset(g_journal.txn_data, 0, max_blocks * sizeof(uint8_t *));
     g_journal.txn_blocks = 0;
     g_journal.txn_capacity = max_blocks;
-    g_journal.in_transaction = 1;
 
     return 0;
 }

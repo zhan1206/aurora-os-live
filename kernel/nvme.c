@@ -400,7 +400,7 @@ static int nvme_io_submit(struct nvme_controller *ctrl,
     if (!ns) return -1;
 
     uint32_t block_size = ns->block_size;
-    uint32_t total_bytes = num_blocks * block_size;
+    uint64_t total_bytes = (uint64_t)num_blocks * block_size;
     uint64_t buf_phys = (uint64_t)(uintptr_t)buf;
 
     /* Build PRP list if needed */
@@ -461,6 +461,15 @@ static int nvme_io_submit(struct nvme_controller *ctrl,
     /* Wait for completion */
     struct nvme_cqe cqe;
     int ret = nvme_wait_completion(ctrl, &ctrl->io_cq, &cqe);
+
+    /* Free PRP list if one was allocated */
+    if (cmd.prp2 && total_bytes > first_page_data) {
+        uint64_t remaining = total_bytes - first_page_data;
+        uint64_t remaining_pages = (remaining + 0xFFFULL) / 0x1000ULL;
+        if (remaining_pages > 1) {
+            kfree((void *)(uintptr_t)cmd.prp2);
+        }
+    }
 
     if (ret < 0) {
         return -1;

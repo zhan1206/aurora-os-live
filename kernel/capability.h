@@ -23,6 +23,9 @@
 
 #include <stdint.h>
 
+/* Bug #13: magic number to distinguish cap_entry from raw file pointers */
+#define CAP_ENTRY_MAGIC  0xCAFEFD00
+
 /* Capability bits */
 #define CAP_READ    (1U << 0)
 #define CAP_WRITE   (1U << 1)
@@ -41,6 +44,7 @@
  * Stored in fd_table alongside the file pointer.
  */
 struct cap_entry {
+    uint32_t  magic;      /* Bug #13: CAP_ENTRY_MAGIC to detect type confusion */
     void     *file;       /* struct file * */
     uint32_t  caps;       /* CAP_* bitmask */
 };

@@ -256,7 +256,8 @@ static ssize_t fat32_transfer_file(struct fat32_sb_info *sbi,
         cluster = next;
     }
 
-    uint32_t max_offset = clusters_per_chain * cluster_size;
+    /* Cast to uint64_t before multiplication to prevent overflow */
+    uint64_t max_offset = (uint64_t)clusters_per_chain * cluster_size;
 
     /* For read: bound by file_size */
     if (!is_write && offset >= file_size) return 0;
@@ -1092,27 +1093,43 @@ int fat32_rmdir(struct fat32_sb_info *sbi, uint32_t parent_cluster,
     /* Must be a directory */
     if (!(found_attr & ATTR_DIRECTORY)) return -ENOTDIR;
 
-    /* Verify the directory is empty (only "." and "..") */
+    /* Verify the directory is empty (only "." and "..").
+     * Walk the entire FAT cluster chain to check all clusters. */
     uint8_t *dir_buf = (uint8_t *)kmalloc(cluster_size);
     if (!dir_buf) return -ENOMEM;
 
-    if (read_cluster(sbi, found_cluster, dir_buf) < 0) {
-        kfree(dir_buf);
-        return -EIO;
-    }
-
     uint32_t entries_per_cluster = cluster_size / sizeof(struct fat32_dir_entry);
     int is_empty = 1;
-    for (uint32_t i = 2; i < entries_per_cluster; i++) {
-        uint8_t *raw = dir_buf + i * sizeof(struct fat32_dir_entry);
-        if (raw[0] != 0x00 && raw[0] != 0xE5) {
-            uint8_t a = raw[11];
-            /* Skip LFN entries */
-            if (a == ATTR_LFN) continue;
-            is_empty = 0;
-            break;
+    uint32_t cluster = found_cluster;
+
+    while (cluster >= 2 && cluster < FAT32_CLUSTER_EOC_MIN) {
+        if (read_cluster(sbi, cluster, dir_buf) < 0) {
+            kfree(dir_buf);
+            return -EIO;
         }
-        if (raw[0] == 0x00) break;
+
+        /* Start from entry 0 for the first cluster (contains "." and ".."),
+         * start from entry 0 for subsequent clusters (no "." or ".." there). */
+        uint32_t start_entry = (cluster == found_cluster) ? 2 : 0;
+
+        for (uint32_t i = start_entry; i < entries_per_cluster; i++) {
+            uint8_t *raw = dir_buf + i * sizeof(struct fat32_dir_entry);
+            if (raw[0] != 0x00 && raw[0] != 0xE5) {
+                uint8_t a = raw[11];
+                /* Skip LFN entries */
+                if (a == ATTR_LFN) continue;
+                is_empty = 0;
+                break;
+            }
+            if (raw[0] == 0x00) break;
+        }
+
+        if (!is_empty) break;
+
+        /* Move to next cluster in the FAT chain */
+        uint32_t next = fat32_get_cluster(sbi, cluster);
+        if (next >= FAT32_CLUSTER_EOC_MIN) break;
+        cluster = next;
     }
     kfree(dir_buf);
 
@@ -1306,10 +1323,13 @@ static ssize_t fat32_file_write(struct file *filp, const void *buf, size_t count
         info->file_size = new_size;
         filp->inode->size = (size_t)new_size;
 
-        /* Update the directory entry with the new file size.
-         * We need to find the directory entry and update it.
-         * Since we don't track the parent directory here, we skip this
-         * for simplicity. The file size is stored in the inode info only. */
+        /* FIXME: Update the directory entry with the new file size.
+         * The parent directory cluster is not tracked in fat32_inode_info,
+         * so we cannot locate the directory entry on disk to update its
+         * file_size field. After unmount/remount, the file size will be
+         * lost. To fix this, add a parent_cluster/dir_entry_offset field
+         * to fat32_inode_info and set it during fat32_dir_lookup, then
+         * use write_cluster() to update the entry's file_size here. */
     }
     return ret;
 }
@@ -1637,6 +1657,14 @@ struct super_block *fat32_mount(struct block_device *bdev) {
     uint32_t total_sectors = bs->bpb.total_sectors_16 != 0 ?
                              bs->bpb.total_sectors_16 : bs->bpb.total_sectors_32;
     {
+        /* Guard against underflow: data_start must be less than total_sectors */
+        if (sbi->data_start >= total_sectors) {
+            log_printf(LOG_LEVEL_ERR, "fat32: data_start (%u) >= total_sectors (%u)\n",
+                       sbi->data_start, total_sectors);
+            kfree(boot_buf);
+            kfree(sbi);
+            return NULL;
+        }
         uint32_t data_sectors = total_sectors - sbi->data_start;
         sbi->total_clusters = data_sectors / sbi->sectors_per_cluster;
     }

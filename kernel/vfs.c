@@ -231,23 +231,33 @@ int vfs_mount(const char *path, struct super_block *sb) {
         return -1;
 
     /* Check if already mounted */
+    vfs_lock();
     struct dentry *existing = dentry_lookup_child(root_dentry, mount_name);
     if (existing) {  /* FIXED: reject any existing dentry, including negative ones */
+        vfs_unlock();
         log_printf(LOG_LEVEL_WARN, "VFS: mount point '%s' already exists\n", path);
         return -1;
     }
 
     /* Create dentry for the mount point */
     struct dentry *mount_dentry = dentry_alloc(mount_name, root_dentry);
-    if (!mount_dentry) return -1;
+    if (!mount_dentry) { vfs_unlock(); return -1; }
 
     /* Associate with the superblock's root inode */
     mount_dentry->inode = sb->root;
     sb->root->dentry = mount_dentry;
     sb->root_dentry = mount_dentry;
 
+    /*
+     * BUGFIX: Mark this dentry as a mount point so vfs_dentry_evict()
+     * does not free the inode.  The inode is the super_block's root
+     * inode — freeing it would leave a dangling pointer in sb->root.
+     */
+    mount_dentry->flags |= DENTRY_FLAG_MOUNT;
+
     /* Add to root's children */
     dentry_add_child(root_dentry, mount_dentry);
+    vfs_unlock();
 
     log_printf(LOG_LEVEL_INFO, "VFS: mounted '%s' at '%s'\n", sb->fs_name, path);
     return 0;
@@ -284,8 +294,11 @@ void vfs_dentry_evict(void) {
          * when parent's dentry is later traversed via dentry_lookup_child. */
         dentry_remove_child(d);
 
-        /* Free the inode if it's only referenced by this dentry */
-        if (d->inode) {
+        /* Free the inode if it's only referenced by this dentry.
+         * BUGFIX: Skip freeing the inode if this dentry is a mount point.
+         * The inode is the super_block's root inode — freeing it would
+         * leave a dangling pointer in sb->root, causing UAF later. */
+        if (d->inode && !(d->flags & DENTRY_FLAG_MOUNT)) {
             if (d->inode->name) {
                 kfree((void *)d->inode->name);
             }
@@ -387,35 +400,41 @@ struct inode *vfs_lookup(const char *path) {
         memcpy(name, start, len);
         name[len] = '\0';
 
-        /* Look up in dentry cache */
+        /* Look up in dentry cache (under vfs_lock) */
+        vfs_lock();
         struct dentry *child = dentry_lookup_child(cur, name);
 
         if (child && child->inode) {
             /* Cache hit — mark as recently used */
             child->access_count++;
             lru_touch(child);
+            vfs_unlock();
             cur = child;
         } else {
-            /* Cache miss: ask filesystem */
+            /* Cache miss: allocate and add dentry under lock */
             if (!child) {
                 child = dentry_alloc(name, cur);
-                if (!child) return NULL;
+                if (!child) { vfs_unlock(); return NULL; }
                 dentry_add_child(cur, child);
             }
+            vfs_unlock();
 
-            /* Ask parent inode to resolve this component */
+            /* Ask parent inode to resolve this component (outside lock) */
             if (cur->inode && cur->inode->ops && cur->inode->ops->lookup) {
                 cur->inode->ops->lookup(cur->inode, child);
             }
 
+            vfs_lock();
             if (!child->inode) {
                 /* Negative dentry: component not found */
+                vfs_unlock();
                 return NULL;
             }
 
             /* Set the inode->dentry back-pointer so file operations
              * can reference the dentry for refcount tracking. */
             child->inode->dentry = child;
+            vfs_unlock();
 
             cur = child;
         }
@@ -458,9 +477,11 @@ struct file *vfs_open(const char *path, int flags) {
      * FIXED: reverted incorrect condition (refcount==0 is never true
      * since dentry_alloc initializes to 1). The original simple
      * increment was correct — each open/close pair balances. */
+    vfs_lock();
     if (inode->dentry) {
         inode->dentry->refcount++;
     }
+    vfs_unlock();
 
     return filp;
 }
@@ -505,10 +526,12 @@ int vfs_close(struct file *filp) {
 
     /* Decrement dentry refcount to allow eviction when no files
      * reference this dentry. */
+    vfs_lock();
     if (filp->inode && filp->inode->dentry) {
         if (filp->inode->dentry->refcount > 0)
             filp->inode->dentry->refcount--;
     }
+    vfs_unlock();
 
     kfree(filp);
     return 0;

@@ -59,15 +59,15 @@ void generic_exception_handler(int vector, uint64_t error_code, uint64_t rip) {
                        ? exception_names[vector] : "Unknown Exception";
 
     log_printf(LOG_LEVEL_ERR, "\n!!! EXCEPTION: %s (vector %d)\n", name, vector);
-    log_printf(LOG_LEVEL_ERR, "    Error code: 0x%x\n", (unsigned int)error_code);
-    log_printf(LOG_LEVEL_ERR, "    RIP:        0x%x\n", (unsigned int)rip);
+    log_printf(LOG_LEVEL_ERR, "    Error code: 0x%llx\n", (unsigned long long)error_code);
+    log_printf(LOG_LEVEL_ERR, "    RIP:        0x%llx\n", (unsigned long long)rip);
 
     /* Read CR2 for page faults */
     if (vector == 14) {
         uint64_t cr2;
         asm volatile ("mov %%cr2, %0" : "=r"(cr2));
-        log_printf(LOG_LEVEL_ERR, "    CR2:        0x%x\n", (unsigned int)cr2);
+        log_printf(LOG_LEVEL_ERR, "    CR2:        0x%llx\n", (unsigned long long)cr2);
     }
 
-    panic("Unhandled exception %d at RIP=0x%x\n", vector, (unsigned int)rip);
+    panic("Unhandled exception %d at RIP=0x%llx\n", vector, (unsigned long long)rip);
 }

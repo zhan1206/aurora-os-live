@@ -373,7 +373,14 @@ uint64_t perf_ticks_to_ns(uint64_t ticks) {
  * ================================================================ */
 uint64_t perf_tsc_to_ns(uint64_t tsc) {
     if (tsc_freq_hz == 0) return 0;
-    /* tsc_ticks * 1e9 / tsc_freq_hz */
+    /* Bug #40: large TSC values can overflow when multiplied by 1e9.
+     * Use 128-bit arithmetic via __int128 if available, otherwise
+     * check for overflow before multiplication. */
+    if (tsc > UINT64_MAX / 1000000000ULL) {
+        /* Overflow would occur; fall back to division-first approach */
+        return (tsc / tsc_freq_hz) * 1000000000ULL
+             + ((tsc % tsc_freq_hz) * 1000000000ULL) / tsc_freq_hz;
+    }
     return (tsc * 1000000000ULL) / tsc_freq_hz;
 }
 

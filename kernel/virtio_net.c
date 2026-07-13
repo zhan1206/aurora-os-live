@@ -326,6 +326,7 @@ static int virtio_net_device_init(struct virtio_net_dev *dev) {
 
     /* Allocate receive buffers */
     dev->rx_buffer_count = 0;
+    int first_rx_idx = -1;  /* Bug #6: save first descriptor head for kick */
     for (uint32_t i = 0; i < dev->rx_vq.num && i < VIRTIO_VQ_MAX_SIZE; i++) {
         void *buf = kmalloc(VIRTIO_NET_MAX_PACKET);
         if (!buf) break;
@@ -340,12 +341,13 @@ static int virtio_net_device_init(struct virtio_net_dev *dev) {
             kfree(buf);
             break;
         }
+        if (first_rx_idx < 0) first_rx_idx = idx;
         dev->rx_buffer_count++;
     }
 
     /* Submit all receive buffers */
     if (dev->rx_buffer_count > 0) {
-        virtq_kick(&dev->rx_vq);
+        virtq_kick(&dev->rx_vq, (uint16_t)first_rx_idx);
         virtio_pci_notify_queue(dev, VIRTIO_NET_RX_QUEUE);
     }
 
@@ -384,7 +386,7 @@ static int virtio_net_send(struct net_device *netdev, const void *data,
     }
 
     /* Submit */
-    virtq_kick(&dev->tx_vq);
+    virtq_kick(&dev->tx_vq, (uint16_t)idx);
     virtio_pci_notify_queue(dev, VIRTIO_NET_TX_QUEUE);
 
     /* Wait for completion */
@@ -431,7 +433,7 @@ static int virtio_net_recv(struct net_device *netdev, void *buf, int max_len) {
                                        VIRTIO_NET_MAX_PACKET,
                                        VIRTQ_DESC_F_WRITE);
     if (new_idx >= 0) {
-        virtq_kick(&dev->rx_vq);
+        virtq_kick(&dev->rx_vq, (uint16_t)new_idx);
         virtio_pci_notify_queue(dev, VIRTIO_NET_RX_QUEUE);
     }
 

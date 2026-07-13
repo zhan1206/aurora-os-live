@@ -45,6 +45,7 @@ void printk_console_ready(void) {
 }
 
 void printk(const char *s) {
+    if (!s) return;
     for (int i = 0; s[i]; ++i) {
         serial_putc(s[i]);
         if (console_ready) {

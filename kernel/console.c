@@ -308,6 +308,13 @@ static void update_hw_cursor(void) {
 /* ================================================================
  * Cell operations
  * ================================================================ */
+/*
+ * NOTE: put_cell_raw and scroll_up write directly to VGA/framebuffer
+ * hardware without a lock. On multi-CPU systems this can cause screen
+ * corruption due to concurrent access. This is a known limitation for
+ * single-CPU systems; multi-CPU support would require a spinlock around
+ * these output functions.
+ */
 static void put_cell_raw(int r, int c, char ch, uint8_t attr) {
     if (g_use_fb) {
         /* Convert VGA attribute to framebuffer colors */

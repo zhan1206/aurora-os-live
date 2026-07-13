@@ -8,7 +8,8 @@
 
 struct ramfs_node {
     struct inode      inode;
-    struct ramfs_node *next;   /* linked list of directory entries */
+    struct ramfs_node *next;     /* next sibling in parent's children list */
+    struct ramfs_node *children; /* first child (for directories) */
     char             *data;
 };
 
@@ -44,7 +45,7 @@ static int ramfs_close(struct inode *inode, struct file *filp) {
  */
 static int ramfs_lookup(struct inode *dir, struct dentry *dentry) {
     struct ramfs_node *head = (struct ramfs_node *)dir;
-    struct ramfs_node *n = head->next;  /* skip root sentinel */
+    struct ramfs_node *n = head->children;  /* first child */
 
     while (n) {
         if (n->inode.name && strcmp(n->inode.name, dentry->name) == 0) {
@@ -52,7 +53,7 @@ static int ramfs_lookup(struct inode *dir, struct dentry *dentry) {
             n->inode.dentry = dentry;
             return 0;
         }
-        n = n->next;
+        n = n->next;  /* next sibling */
     }
     return -1;  /* not found (negative dentry) */
 }
@@ -68,7 +69,7 @@ static int ramfs_create(struct inode *dir, const char *name, int flags) {
     if (!head || !head->inode.is_dir || !name) return -1;
 
     /* Check for duplicate name */
-    struct ramfs_node *existing = head->next;
+    struct ramfs_node *existing = head->children;
     while (existing) {
         if (existing->inode.name && strcmp(existing->inode.name, name) == 0)
             return -1;  /* Already exists */
@@ -89,9 +90,9 @@ static int ramfs_create(struct inode *dir, const char *name, int flags) {
     n->inode.is_dir = 0;
     n->inode.priv   = NULL;
 
-    /* Insert at head of directory listing */
-    n->next = head->next;
-    head->next = n;
+    /* Insert at head of directory children list */
+    n->next = head->children;
+    head->children = n;
 
     return 0;
 }
@@ -139,7 +140,7 @@ static int ramfs_mkdir(struct inode *dir, const char *name) {
     if (!head || !head->inode.is_dir || !name) return -1;
 
     /* Check for duplicate name */
-    struct ramfs_node *existing = head->next;
+    struct ramfs_node *existing = head->children;
     while (existing) {
         if (existing->inode.name && strcmp(existing->inode.name, name) == 0)
             return -1;
@@ -159,10 +160,11 @@ static int ramfs_mkdir(struct inode *dir, const char *name) {
     n->inode.ops    = &ramfs_dir_ops;
     n->inode.is_dir = 1;
     n->inode.priv   = NULL;
+    n->children     = NULL;
 
-    /* Insert at head of directory listing */
-    n->next = head->next;
-    head->next = n;
+    /* Insert at head of directory children list */
+    n->next = head->children;
+    head->children = n;
 
     return 0;
 }
@@ -174,12 +176,15 @@ static int ramfs_unlink(struct inode *dir, const char *name) {
     struct ramfs_node *head = (struct ramfs_node *)dir;
     if (!head || !head->inode.is_dir || !name) return -1;
 
-    struct ramfs_node *prev = head;
-    struct ramfs_node *cur = head->next;
+    struct ramfs_node *prev = NULL;
+    struct ramfs_node *cur = head->children;
     while (cur) {
         if (cur->inode.name && strcmp(cur->inode.name, name) == 0) {
             if (cur->inode.is_dir) return -1;  /* cannot unlink a directory */
-            prev->next = cur->next;
+            if (prev)
+                prev->next = cur->next;
+            else
+                head->children = cur->next;
             if (cur->inode.name) kfree((void *)cur->inode.name);
             if (cur->data) kfree(cur->data);
             kfree(cur);
@@ -198,13 +203,16 @@ static int ramfs_rmdir(struct inode *dir, const char *name) {
     struct ramfs_node *head = (struct ramfs_node *)dir;
     if (!head || !head->inode.is_dir || !name) return -1;
 
-    struct ramfs_node *prev = head;
-    struct ramfs_node *cur = head->next;
+    struct ramfs_node *prev = NULL;
+    struct ramfs_node *cur = head->children;
     while (cur) {
         if (cur->inode.name && strcmp(cur->inode.name, name) == 0) {
             if (!cur->inode.is_dir) return -1;  /* not a directory */
-            if (cur->next) return -1;  /* directory not empty */
-            prev->next = cur->next;
+            if (cur->children) return -1;  /* directory not empty */
+            if (prev)
+                prev->next = cur->next;
+            else
+                head->children = cur->next;
             if (cur->inode.name) kfree((void *)cur->inode.name);
             kfree(cur);
             return 0;
@@ -266,7 +274,7 @@ int ramfs_add_file(const char *name, const char *content) {
     if (!content) content = "";
 
     /* Check for duplicate file names */
-    struct ramfs_node *existing = ramfs_root->next;
+    struct ramfs_node *existing = ramfs_root->children;
     while (existing) {
         if (existing->inode.name && strcmp(existing->inode.name, name) == 0) {
             log_printf(LOG_LEVEL_WARN, "ramfs: duplicate file '%s' ignored\n", name);
@@ -293,9 +301,9 @@ int ramfs_add_file(const char *name, const char *content) {
     n->inode.is_dir = 0;
     n->inode.priv   = NULL;
 
-    /* Insert at head of directory listing */
-    n->next = ramfs_root->next;
-    ramfs_root->next = n;
+    /* Insert at head of directory children list */
+    n->next = ramfs_root->children;
+    ramfs_root->children = n;
     return 0;
 }
 
@@ -304,7 +312,7 @@ int ramfs_add_file_data(const char *name, const void *data, size_t size) {
     if (!name || !data) return -1;
 
     /* Check for duplicate file names */
-    struct ramfs_node *existing = ramfs_root->next;
+    struct ramfs_node *existing = ramfs_root->children;
     while (existing) {
         if (existing->inode.name && strcmp(existing->inode.name, name) == 0) {
             log_printf(LOG_LEVEL_WARN, "ramfs: duplicate file '%s' ignored\n", name);
@@ -330,7 +338,7 @@ int ramfs_add_file_data(const char *name, const void *data, size_t size) {
     n->inode.is_dir = 0;
     n->inode.priv   = NULL;
 
-    n->next = ramfs_root->next;
-    ramfs_root->next = n;
+    n->next = ramfs_root->children;
+    ramfs_root->children = n;
     return 0;
 }

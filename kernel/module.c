@@ -276,14 +276,52 @@ int module_load(const char *path) {
     }
 
     /* Read section header string table */
+
+    /* Bug #8 fix: validate e_shstrndx bounds before using as array index.
+     * A malicious ELF could set e_shstrndx to 0xFFFF, causing an out-of-bounds
+     * read from shdrs[]. */
+    if (ehdr.e_shstrndx >= shnum) {
+        log_printf(LOG_LEVEL_ERR, "module_load: invalid e_shstrndx (%u >= %u)\n",
+                   ehdr.e_shstrndx, shnum);
+        kfree(shdrs);
+        vfs_close(f);
+        return -1;
+    }
+
     Elf64_Shdr *shstrtab_hdr = &shdrs[ehdr.e_shstrndx];
-    char *shstrtab = (char *)kmalloc(shstrtab_hdr->sh_size);
+
+    /* Bug #9 fix: validate sh_size and sh_offset against file size.
+     * A malicious ELF can specify huge sizes causing kmalloc to fail or overflow,
+     * or sh_offset + sh_size could exceed the file boundaries. */
+    size_t shstrtab_size = shstrtab_hdr->sh_size;
+    if (shstrtab_size > 65536) {  /* cap at 64KB, reasonable for a string table */
+        log_printf(LOG_LEVEL_ERR, "module_load: shstrtab size too large (%zu)\n",
+                   shstrtab_size);
+        kfree(shdrs);
+        vfs_close(f);
+        return -1;
+    }
+
+    /* Validate that sh_offset + sh_size doesn't exceed file size, and
+     * also check for integer overflow in the addition. */
+    {
+        size_t file_sz = f->inode->size;
+        if (shstrtab_hdr->sh_offset + shstrtab_size > file_sz ||
+            shstrtab_hdr->sh_offset + shstrtab_size < shstrtab_hdr->sh_offset) {
+            log_printf(LOG_LEVEL_ERR, "module_load: shstrtab offset/size out of file bounds\n");
+            kfree(shdrs);
+            vfs_close(f);
+            return -1;
+        }
+    }
+
+    char *shstrtab = (char *)kmalloc(shstrtab_size);
     if (!shstrtab) { kfree(shdrs); vfs_close(f); return -1; }
     f->offset = shstrtab_hdr->sh_offset;
-    if (vfs_read(f, shstrtab, shstrtab_hdr->sh_size) != (ssize_t)shstrtab_hdr->sh_size) {
+    if (vfs_read(f, shstrtab, shstrtab_size) != (ssize_t)shstrtab_size) {
         log_printf(LOG_LEVEL_WARN, "module_load: read shstrtab failed\n");
         /* Continue with empty string table - section names will be unavailable */
-        memset(shstrtab, 0, shstrtab_hdr->sh_size);
+        memset(shstrtab, 0, shstrtab_size);
     }
 
     /* --- First pass: collect allocatable sections and compute total size --- */
@@ -311,9 +349,32 @@ int module_load(const char *path) {
         if (!is_alloc || shdrs[i].sh_size == 0) continue;
 
         uint64_t align = shdrs[i].sh_addralign;
+        /* Bug #46: attacker-controlled sh_addralign can cause overflow in
+         * alignment calculations. Validate it is a power of 2 and within
+         * a reasonable range (<= 4096, the page size). */
+        if (align == 0 || (align & (align - 1)) != 0 || align > 4096) {
+            log_printf(LOG_LEVEL_ERR, "module_load: invalid sh_addralign %llu\n",
+                       (unsigned long long)align);
+            kfree(shstrtab);
+            kfree(shdrs);
+            vfs_close(f);
+            return -1;
+        }
         if (align < 16) align = 16;
 
+        /* Bug #10 fix: check for integer overflow in align_up.
+         * total_size could overflow and wrap to a small value, causing
+         * kmalloc to allocate a tiny buffer for a large module. */
+        size_t old_total = total_size;
         total_size = align_up(total_size, align);
+        if (total_size < old_total) {
+            /* Integer overflow detected */
+            log_printf(LOG_LEVEL_ERR, "module_load: total_size overflow\n");
+            kfree(shstrtab);
+            kfree(shdrs);
+            vfs_close(f);
+            return -1;
+        }
 
         secs[nsecs].addr        = 0;  /* will be assigned */
         secs[nsecs].size        = shdrs[i].sh_size;
@@ -362,6 +423,18 @@ int module_load(const char *path) {
     /* --- Resolve symbols and apply relocations --- */
     char *strtab_data = NULL;
     if (strtab_hdr && strtab_hdr->sh_size > 0) {
+        /* Bug #11 fix: validate strtab size before kmalloc.
+         * An attacker-controlled ELF could specify a huge sh_size causing
+         * kmalloc to fail or wrap. Cap at a reasonable maximum (1MB). */
+        if (strtab_hdr->sh_size > 1048576) {  /* 1MB cap */
+            log_printf(LOG_LEVEL_ERR, "module_load: strtab size too large (%llu)\n",
+                       (unsigned long long)strtab_hdr->sh_size);
+            kfree(shstrtab);
+            kfree(shdrs);
+            kfree(mod_base);
+            vfs_close(f);
+            return -1;
+        }
         strtab_data = (char *)kmalloc(strtab_hdr->sh_size);
         if (strtab_data) {
             f->offset = strtab_hdr->sh_offset;
@@ -399,7 +472,13 @@ int module_load(const char *path) {
         /* Compute the base address of the target section.
          * Find which sec_info entry corresponds to this section index
          * by matching size and file_offset. */
-        if (target_sec < shnum && (shdrs[target_sec].sh_flags & 0x2)) {
+        /* Bug #12 fix: validate target_sec is a valid section index and
+         * that the target section type is one we can relocate (SHT_PROGBITS
+         * or SHT_NOBITS). sh_info is attacker-controlled in a malicious ELF. */
+        if (target_sec < shnum &&
+            (shdrs[target_sec].sh_flags & 0x2) &&
+            (shdrs[target_sec].sh_type == SHT_PROGBITS ||
+             shdrs[target_sec].sh_type == SHT_NOBITS)) {
             uint64_t tgt_size = shdrs[target_sec].sh_size;
             uint64_t tgt_off  = shdrs[target_sec].sh_offset;
             for (int j = 0; j < nsecs; j++) {

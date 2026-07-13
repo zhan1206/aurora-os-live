@@ -343,6 +343,7 @@ void devtmpfs_init(void) {
 
     if (vfs_mount("/dev", dev_sb) < 0) {
         log_printf(LOG_LEVEL_ERR, "devtmpfs: failed to mount at /dev\n");
+        kfree(dev_sb);
         return;
     }
 

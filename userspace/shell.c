@@ -101,7 +101,7 @@ int main(void) {
             printf("PID=%d\n", getpid());
         } else if (strcmp(buf, "clear") == 0) {
             printf("\x1b[2J\x1b[H");
-        } else if (strncmp(buf, "exit", 4) == 0) {
+        } else if (strncmp(buf, "exit", 4) == 0 && (buf[4] == '\0' || buf[4] == ' ')) {
             int code = buf[4] ? atoi(buf + 5) : 0;
             printf("Exiting with code %d\n", code);
             exit(code);

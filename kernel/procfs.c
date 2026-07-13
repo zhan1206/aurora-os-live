@@ -800,6 +800,7 @@ void procfs_init(void) {
 
     if (vfs_mount("/proc", proc_sb) < 0) {
         log_printf(LOG_LEVEL_ERR, "procfs: failed to mount at /proc\n");
+        kfree(proc_sb);
         return;
     }
 

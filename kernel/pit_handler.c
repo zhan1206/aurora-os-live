@@ -48,6 +48,12 @@ void pit_irq_c_handler(void *rsp) {
      * use a timer wheel or priority queue would be better.
      */
     {
+        /* NOTE: This code runs in interrupt context (PIT/APIC timer IRQ),
+         * so interrupts are already disabled on this CPU. The spin_lock
+         * here is safe because the target CPU cannot hold the rq lock
+         * with IRQs enabled while we are in our IRQ handler. If the
+         * target CPU holds the lock, it will release it without needing
+         * IRQs to be enabled on our side. */
         extern struct run_queue per_cpu_rq[];
         extern int num_cpus;
         for (int cpu = 0; cpu < num_cpus && cpu < MAX_CPUS; cpu++) {

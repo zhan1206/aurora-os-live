@@ -7,9 +7,12 @@
 #include "include/log.h"
 #include "include/userspace.h"
 #include "include/trapframe.h"
+#include "smp.h"
 #include "mem.h"
 #include <string.h>
 #include <stdint.h>
+
+static spinlock_t signal_lock = {0};
 
 struct signal_state *signal_alloc(void) {
     struct signal_state *s = (struct signal_state *)kmalloc(sizeof(*s));
@@ -38,12 +41,14 @@ int do_sys_kill(int pid, int sig) {
         target->sig->pending |= (1U << sig);
     }
 
+    spin_lock(&signal_lock);
     if (target->state == TASK_BLOCKED) {
         if (sig == SIGKILL ||
             (target->sig->actions[sig].sa_handler != SIG_IGN)) {
             target->state = TASK_READY;
         }
     }
+    spin_unlock(&signal_lock);
 
     return 0;
 }
@@ -123,7 +128,7 @@ void do_sys_sigreturn(void) {
             current_tf->r14 = frame.r14;
             current_tf->r13 = frame.r13;
             current_tf->r12 = frame.r12;
-            current_tf->r11 = frame.r11;
+            current_tf->r11 = frame.rflags;  /* R11 = RFLAGS for syscall exit */
             current_tf->r10 = frame.r10;
             current_tf->r9  = frame.r9;
             current_tf->r8  = frame.r8;
@@ -255,9 +260,11 @@ void check_signals(void) {
             return;
         }
 
-        /* Write trampoline code at new_rsp + 8.
-         * Temporarily disable SMAP via STAC to allow kernel access
-         * to user-space stack for signal frame setup. */
+        /* Save RFLAGS to restore AC flag after user memory access.
+         * This ensures SMAP is properly re-enabled even if an
+         * exception occurs within the protected window. */
+        uint64_t saved_rflags;
+        asm volatile ("pushfq; popq %0" : "=r"(saved_rflags));
         asm volatile ("stac" ::: "memory");
 
         uint8_t *tramp = (uint8_t *)(uintptr_t)(new_rsp + 8);
@@ -296,8 +303,8 @@ void check_signals(void) {
         frame->rcx    = current_tf->rcx;
         frame->rax    = current_tf->rax;
         frame->rip    = current_tf->rip;
+        frame->rflags = current_tf->r11;  /* R11 holds RFLAGS from syscall entry */
         frame->rsp    = user_rsp;
-        /* RFLAGS not directly in trapframe but R11 holds it for syscall */
 
         /* Store saved context in per-task signal_state (thread-safe) */
         sig->saved_rsp = frame->rsp;
@@ -308,8 +315,11 @@ void check_signals(void) {
         current_tf->rsp = new_rsp;
         current_tf->rdi = (uint64_t)s;  /* arg0 = signo */
 
-        /* Re-enable SMAP via CLAC — user-space writes are done */
-        asm volatile ("clac" ::: "memory");
+        /* Restore AC flag to its original state, re-enabling SMAP
+         * if it was previously enabled. */
+        if (!(saved_rflags & (1ULL << 18))) {
+            asm volatile ("clac" ::: "memory");
+        }
 
         /* Block the signal during handler execution */
         sig->blocked |= (1U << s);

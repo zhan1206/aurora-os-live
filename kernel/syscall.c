@@ -412,7 +412,10 @@ static long sys_execve(const char *path, char *const argv[], char *const envp[])
     if (len < 0 || len >= (int)sizeof(kpath)) { current->t_errno = EFAULT; return -1; }
     kpath[len] = '\0';
 
-    /* Copy argv to kernel space if provided */
+    /* Copy argv to kernel space if provided.
+     * Bug #44 (TOCTOU): argv pointers live in userspace and can be modified
+     * between the range check and copy_from_user. This is a known limitation;
+     * a full fix would require copy_from_user for the entire argv array at once. */
     if (argv) {
         if (!user_addr_range_ok(argv, sizeof(char *) * 32)) {
             current->t_errno = EFAULT; return -1;
@@ -1412,19 +1415,47 @@ static long sys_sbrk(intptr_t increment) {
     uint64_t old_brk = current_brk;
     uint64_t new_brk = current_brk + (uint64_t)increment;
 
+    /* Bug #7: overflow check — a large increment could wrap around */
+    if (increment > 0 && new_brk < current_brk) {
+        current->t_errno = EINVAL;
+        return -1;
+    }
+    /* Bug #7: prevent mapping into kernel space (user-space limit) */
+    if (new_brk > 0x7FFFFFFFFFFFULL) {
+        current->t_errno = EINVAL;
+        return -1;
+    }
+
     /* Allocate pages for the heap expansion */
     if (increment > 0) {
         size_t num_pages = ((size_t)increment + PAGE_SIZE - 1) / PAGE_SIZE;
+        /* Bug #45: track allocated pages for cleanup on failure */
+        void **alloced_pages = (void **)kmalloc(num_pages * sizeof(void *));
+        size_t alloced_count = 0;
         for (size_t i = 0; i < num_pages; i++) {
             void *phys = alloc_page();
-            if (!phys) { current->t_errno = ENOMEM; return -1; }
+            if (!phys) {
+                /* Bug #45: cleanup all pages allocated so far */
+                for (size_t j = 0; j < alloced_count; j++) {
+                    free_page(alloced_pages[j]);
+                }
+                kfree(alloced_pages);
+                current->t_errno = ENOMEM; return -1;
+            }
             memset(phys, 0, PAGE_SIZE);
             if (map_page(current->cr3, old_brk + i * PAGE_SIZE,
                          (uint64_t)(uintptr_t)phys, PTE_USER | PTE_RW) != 0) {
                 free_page(phys);
+                /* Bug #45: cleanup all pages allocated so far */
+                for (size_t j = 0; j < alloced_count; j++) {
+                    free_page(alloced_pages[j]);
+                }
+                kfree(alloced_pages);
                 current->t_errno = ENOMEM; return -1;
             }
+            alloced_pages[alloced_count++] = phys;
         }
+        kfree(alloced_pages);
     }
 
     current_brk = new_brk;

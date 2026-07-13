@@ -284,7 +284,7 @@ int  virtq_add_descriptor(struct virtq *vq, uint64_t addr, uint32_t len,
                           uint16_t flags);
 int  virtq_add_chain(struct virtq *vq, uint64_t *addrs, uint32_t *lens,
                      uint16_t *flags, uint32_t num);
-void virtq_kick(struct virtq *vq);
+void virtq_kick(struct virtq *vq, uint16_t head);
 int  virtq_get_buf(struct virtq *vq, uint32_t *len);
 
 #endif /* VIRTIO_H */

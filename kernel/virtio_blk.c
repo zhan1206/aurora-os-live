@@ -190,12 +190,13 @@ int virtq_add_chain(struct virtq *vq, uint64_t *addrs, uint32_t *lens,
     return first;
 }
 
-void virtq_kick(struct virtq *vq) {
+void virtq_kick(struct virtq *vq, uint16_t head) {
     /* Ensure writes are visible */
     asm volatile ("" ::: "memory");
 
-    /* Place the descriptor head in the available ring */
-    vq->avail->ring[vq->avail->idx % vq->num] = (uint16_t)vq->avail->idx;
+    /* Place the descriptor head in the available ring.
+     * Bug #5 fix: use the actual head descriptor index, not avail->idx. */
+    vq->avail->ring[vq->avail->idx % vq->num] = head;
     vq->avail->idx++;
 }
 
@@ -208,6 +209,13 @@ int virtq_get_buf(struct virtq *vq, uint32_t *len) {
     struct virtq_used_elem *elem = &vq->used->ring[used_idx];
 
     if (len) *len = elem->len;
+
+    /* Bounds check: elem->id must be within the descriptor table */
+    if (elem->id >= vq->num) {
+        log_printf(LOG_LEVEL_ERR, "virtq_get_buf: elem->id %u out of bounds (num=%u)\n",
+                   elem->id, vq->num);
+        return -1;
+    }
 
     /* Return descriptor to free list */
     uint32_t desc_id = elem->id;
@@ -523,7 +531,7 @@ static int virtio_blk_do_io(struct virtio_blk_dev *dev, uint32_t type,
     }
 
     /* Submit to device */
-    virtq_kick(&dev->vq);
+    virtq_kick(&dev->vq, (uint16_t)head);
     virtio_pci_notify_queue(dev, 0);
 
     /* Wait for completion (poll used ring) */
@@ -568,6 +576,9 @@ static int virtio_blk_write(const void *buf, uint64_t sector, int count) {
 
 int virtio_blk_get_capacity(struct virtio_blk_dev *dev) {
     if (!dev) return -1;
+    /* Bug #39: dev->capacity is uint64_t; converting to int is UB if >2^31-1.
+     * Cap at 0x7FFFFFFF (INT_MAX) to avoid undefined behavior on large disks. */
+    if (dev->capacity > 0x7FFFFFFFULL) return 0x7FFFFFFF;
     return (int)dev->capacity;
 }
 

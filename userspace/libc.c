@@ -84,9 +84,20 @@ static void *memcpy(void *dst, const void *src, unsigned long n) {
  * ================================================================ */
 static int itoa_int(int val, char *buf, int bufsz) {
     int n = 0;
-    if (val < 0) { if (n < bufsz-1) buf[n++] = '-'; val = -val; }
+    /* Bug #43: val = -val is UB when val == INT_MIN.
+     * Handle INT_MIN as a special case by using unsigned arithmetic. */
+    if (val < 0) {
+        if (n < bufsz-1) buf[n++] = '-';
+        unsigned int uval = (unsigned int)(-(val + 1)) + 1U;
+        char tmp[16]; int tn = 0;
+        if (uval == 0) tmp[tn++] = '0';
+        while (uval > 0 && tn < 15) { tmp[tn++] = '0' + (uval % 10); uval /= 10; }
+        for (int i = tn - 1; i >= 0 && n < bufsz-1; i--) buf[n++] = tmp[i];
+        buf[n] = '\0';
+        return n;
+    }
+    if (val == 0) { if (n < bufsz-1) buf[n++] = '0'; buf[n] = '\0'; return n; }
     char tmp[16]; int tn = 0;
-    if (val == 0) tmp[tn++] = '0';
     while (val > 0 && tn < 15) { tmp[tn++] = '0' + (val % 10); val /= 10; }
     for (int i = tn - 1; i >= 0 && n < bufsz-1; i--) buf[n++] = tmp[i];
     buf[n] = '\0';
@@ -137,13 +148,16 @@ int printf(const char *fmt, ...) {
                 for (int i = tn-1; i >= 0 && n < 500; i--) buf[n++] = tmp[i];
             } else if (*p == 'c') {
                 char c = (char)__builtin_va_arg(ap, int);
-                buf[n++] = c;
+                /* Bug #42: bounds check before writing to buf */
+                if (n < 500) buf[n++] = c;
             } else if (*p == 'x') {
                 unsigned int v = __builtin_va_arg(ap, unsigned int);
                 char tmp[16]; int tn = 0;
                 if (v == 0) tmp[tn++] = '0';
                 while (v > 0 && tn < 15) { int nib = v & 0xF; tmp[tn++] = nib < 10 ? '0'+nib : 'a'+nib-10; v >>= 4; }
-                buf[n++] = '0'; buf[n++] = 'x';
+                /* Bug #42: bounds check for "0x" prefix */
+                if (n < 500) buf[n++] = '0';
+                if (n < 500) buf[n++] = 'x';
                 for (int i = tn-1; i >= 0 && n < 500; i--) buf[n++] = tmp[i];
             } else {
                 buf[n++] = '%'; if (*p) buf[n++] = *p;
@@ -304,6 +318,9 @@ void free(void *ptr) {
 }
 
 void *calloc(unsigned long nmemb, unsigned long size) {
+    /* Bug #41: nmemb * size can overflow, leading to a small allocation
+     * and a memset that writes past the buffer. Check for overflow. */
+    if (nmemb != 0 && size > (~0UL) / nmemb) return NULL;
     unsigned long total = nmemb * size;
     void *ptr = malloc(total);
     if (ptr) memset(ptr, 0, total);

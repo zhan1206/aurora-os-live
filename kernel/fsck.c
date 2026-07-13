@@ -300,7 +300,11 @@ static int check_directory(struct block_device *bdev,
     if (!gd_buf) return -1;
 
     uint32_t gd_block = gd_start + group / gd_per_block;
-    read_fs_block(bdev, block_size, gd_block, gd_buf);
+    if (read_fs_block(bdev, block_size, gd_block, gd_buf) < 0) {
+        if (stats) stats->dirs_errors++;
+        kfree(gd_buf);
+        return -1;
+    }
     struct ext2_group_desc *gd = (struct ext2_group_desc *)(gd_buf + (group % gd_per_block) * 32);
 
     /* Read inode */
@@ -310,7 +314,12 @@ static int check_directory(struct block_device *bdev,
     uint8_t *inode_buf = (uint8_t *)kmalloc(block_size);
     if (!inode_buf) { kfree(gd_buf); return -1; }
 
-    read_fs_block(bdev, block_size, inode_table_block, inode_buf);
+    if (read_fs_block(bdev, block_size, inode_table_block, inode_buf) < 0) {
+        if (stats) stats->dirs_errors++;
+        kfree(inode_buf);
+        kfree(gd_buf);
+        return -1;
+    }
     struct ext2_inode *inode = (struct ext2_inode *)(inode_buf + inode_offset);
 
     if (!(inode->i_mode & EXT2_S_IFDIR)) {
@@ -331,7 +340,10 @@ static int check_directory(struct block_device *bdev,
         if (logical_block >= EXT2_NDIR_BLOCKS) break;
         if (inode->i_block[logical_block] == 0) break;
 
-        read_fs_block(bdev, block_size, inode->i_block[logical_block], dir_buf);
+        if (read_fs_block(bdev, block_size, inode->i_block[logical_block], dir_buf) < 0) {
+            if (stats) stats->dirs_errors++;
+            break;
+        }
 
         while (block_off < block_size) {
             struct ext2_dir_entry *de = (struct ext2_dir_entry *)(dir_buf + block_off);

@@ -429,18 +429,21 @@ static uint64_t elf_setup_user_stack(uint64_t pml4, int argc,
 
     /* Allocate and map stack pages */
     uint64_t stack_bottom = stack_top - USER_STACK_SIZE;
-    for (uint64_t va = stack_bottom; va < stack_top; va += PAGE_SIZE) {
+    uint64_t va;
+    void *stack_pages[USER_STACK_PAGES];
+    int num_stack_pages = 0;
+    for (va = stack_bottom; va < stack_top; va += PAGE_SIZE) {
         void *phys = alloc_page();
         if (!phys) {
             log_printf(LOG_LEVEL_ERR, "elf_setup_user_stack: out of memory\n");
-            return 0;
+            goto free_stack;
         }
+        stack_pages[num_stack_pages++] = phys;
         memset(phys, 0, PAGE_SIZE);
         if (map_page(pml4, va, (uint64_t)(uintptr_t)phys,
                      PTE_USER | PTE_RW | PTE_NX) != 0) {
-            free_page(phys);
             log_printf(LOG_LEVEL_ERR, "elf_setup_user_stack: map_page failed\n");
-            return 0;
+            goto free_stack;
         }
     }
 
@@ -471,7 +474,7 @@ static uint64_t elf_setup_user_stack(uint64_t pml4, int argc,
         (size_t)(argc + envc + 1) * sizeof(uint64_t));
     if (!str_ptrs) {
         log_printf(LOG_LEVEL_ERR, "elf_setup_user_stack: kmalloc failed\n");
-        return 0;
+        goto free_stack;
     }
 
     int str_idx = 0;
@@ -481,7 +484,7 @@ static uint64_t elf_setup_user_stack(uint64_t pml4, int argc,
         size_t len = strlen(envp[i]) + 1;
         write_pos -= len;
         uint64_t phys = elf_resolve_va(pml4, write_pos);
-        if (!phys) { kfree(str_ptrs); return 0; }
+        if (!phys) { goto free_stack_and_data; }
         memcpy((void *)(uintptr_t)phys, envp[i], len);
         str_ptrs[str_idx++] = write_pos;
     }
@@ -494,7 +497,7 @@ static uint64_t elf_setup_user_stack(uint64_t pml4, int argc,
         size_t len = strlen(argv[i]) + 1;
         write_pos -= len;
         uint64_t phys = elf_resolve_va(pml4, write_pos);
-        if (!phys) { kfree(str_ptrs); return 0; }
+        if (!phys) { goto free_stack_and_data; }
         memcpy((void *)(uintptr_t)phys, argv[i], len);
         str_ptrs[str_idx++] = write_pos;
     }
@@ -506,70 +509,70 @@ static uint64_t elf_setup_user_stack(uint64_t pml4, int argc,
     write_pos -= 16;
     if (elf_poke64(pml4, write_pos, AT_NULL) != 0 ||
         elf_poke64(pml4, write_pos + 8, 0) != 0) {
-        kfree(str_ptrs); return 0;
+        goto free_stack_and_data;
     }
 
     write_pos -= 16;
     if (elf_poke64(pml4, write_pos, AT_PAGESZ) != 0 ||
         elf_poke64(pml4, write_pos + 8, PAGE_SIZE) != 0) {
-        kfree(str_ptrs); return 0;
+        goto free_stack_and_data;
     }
 
     write_pos -= 16;
     if (elf_poke64(pml4, write_pos, AT_ENTRY) != 0 ||
         elf_poke64(pml4, write_pos + 8, entry) != 0) {
-        kfree(str_ptrs); return 0;
+        goto free_stack_and_data;
     }
 
     write_pos -= 16;
     if (elf_poke64(pml4, write_pos, AT_PHNUM) != 0 ||
         elf_poke64(pml4, write_pos + 8, phnum) != 0) {
-        kfree(str_ptrs); return 0;
+        goto free_stack_and_data;
     }
 
     write_pos -= 16;
     if (elf_poke64(pml4, write_pos, AT_PHENT) != 0 ||
         elf_poke64(pml4, write_pos + 8, phentsize) != 0) {
-        kfree(str_ptrs); return 0;
+        goto free_stack_and_data;
     }
 
     write_pos -= 16;
     if (elf_poke64(pml4, write_pos, AT_PHDR) != 0 ||
         elf_poke64(pml4, write_pos + 8, phdr_addr) != 0) {
-        kfree(str_ptrs); return 0;
+        goto free_stack_and_data;
     }
 
     /* --- Step 4: Write envp pointer array (NULL-terminated) --- */
     write_pos -= 8;
-    if (elf_poke64(pml4, write_pos, 0) != 0) { kfree(str_ptrs); return 0; }
+    if (elf_poke64(pml4, write_pos, 0) != 0) { goto free_stack_and_data; }
     for (int i = envc - 1; i >= 0; --i) {
         write_pos -= 8;
         if (elf_poke64(pml4, write_pos, str_ptrs[envp_start_idx + i]) != 0) {
-            kfree(str_ptrs); return 0;
+            goto free_stack_and_data;
         }
     }
 
     /* --- Step 5: Write argv pointer array (NULL-terminated) --- */
     write_pos -= 8;
-    if (elf_poke64(pml4, write_pos, 0) != 0) { kfree(str_ptrs); return 0; }
+    if (elf_poke64(pml4, write_pos, 0) != 0) { goto free_stack_and_data; }
     for (int i = argc - 1; i >= 0; --i) {
         write_pos -= 8;
         if (elf_poke64(pml4, write_pos, str_ptrs[argv_start_idx + i]) != 0) {
-            kfree(str_ptrs); return 0;
+            goto free_stack_and_data;
         }
     }
 
     /* --- Step 6: Write argc --- */
     write_pos -= 8;
     if (elf_poke64(pml4, write_pos, (uint64_t)argc) != 0) {
-        kfree(str_ptrs); return 0;
+        goto free_stack_and_data;
     }
 
     /* --- Step 7: Ensure 16-byte stack alignment --- */
     if (write_pos & 0xF) {
         write_pos -= 8;
         if (elf_poke64(pml4, write_pos, 0) != 0) {
-            kfree(str_ptrs); return 0;
+            goto free_stack_and_data;
         }
     }
 
@@ -580,6 +583,16 @@ static uint64_t elf_setup_user_stack(uint64_t pml4, int argc,
                argc, envc, (void *)(uintptr_t)write_pos,
                (void *)(uintptr_t)stack_top);
     return write_pos;
+
+free_stack_and_data:
+    kfree(str_ptrs);
+free_stack:
+    /* Unmap and free all stack pages allocated so far */
+    for (uint64_t v = stack_bottom, idx = 0; idx < (uint64_t)num_stack_pages; v += PAGE_SIZE, idx++) {
+        unmap_page(pml4, v);
+        free_page(stack_pages[idx]);
+    }
+    return 0;
 }
 
 /*
@@ -853,8 +866,9 @@ void *elf_load_pie(const char *path, char *const argv[], char *const envp[],
 /* helper to create task from ELF path */
 int exec_elf(const char *path) {
     uint64_t pml4 = 0;
-    void *entry = elf_load(path, &pml4);
+    uint64_t stack = 0;
+    void *entry = elf_load_pie(path, NULL, NULL, &pml4, &stack);
     if (!entry) return -1;
-    int pid = create_user_task_from_entry((void(*)(void))entry, pml4);
+    int pid = create_user_task_from_entry((void(*)(void))entry, pml4, stack);
     return pid;
 }

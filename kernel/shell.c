@@ -1108,7 +1108,7 @@ static void do_lock(void) {
 
     /* Wait for input by yielding — non-blocking poll loop */
     for (;;) {
-        char dummy[2];
+        char dummy[256];
         int len = console_getline(dummy, sizeof(dummy));
         if (len > 0) break;
         yield();
