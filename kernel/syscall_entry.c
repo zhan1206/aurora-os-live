@@ -82,6 +82,5 @@ void syscall_init(void) {
     wrmsr(IA32_KERNEL_GS_BASE, 0);
     wrmsr(IA32_GS_BASE, 0);
 
-    log_printf(LOG_LEVEL_INFO, "syscall: MSRs configured (LSTAR=%p, GS bases set)\n",
-               (void *)addr);
+    log_printf(LOG_LEVEL_INFO, "syscall: MSRs configured (GS bases set)\n");
 }

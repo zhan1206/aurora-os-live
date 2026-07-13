@@ -102,6 +102,7 @@ struct task_struct {
 
     /* --- Security --- */
     struct seccomp_filter *seccomp;  /* syscall filter (NULL = all allowed) */
+    int       seccomp_lock; /* spinlock for seccomp filter access (FIX: UAF race) */
 
     /* --- Child list protection --- */
     int       child_lock;      /* spinlock for children list (FIX: waitpid race) */

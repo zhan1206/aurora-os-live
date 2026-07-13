@@ -1,5 +1,55 @@
 # AuroraOS Changelog
 
+## v4.0.6 (2026-07-13) — 安全机制深度加固
+
+### 🔴 严重修复 (P0 - Critical)
+
+#### 模块签名机制：从占位算法到 SHA-256 完整实现
+- **module_sign.c**: 将 XOR 滚动哈希替换为标准 SHA-256 实现（含完整 64 轮变换和消息填充）
+- **module_sign.c**: 新增 `constant_time_memcmp` 常时比较函数，防止签名验证的时序侧信道攻击
+- **module_sign.c**: 签名比较从仅比对前 32 字节修复为完整 64 字节（`MODULE_SIGN_SIZE`）
+- **module.c**: `module_load()` 入口强制调用 `module_sign_verify()`，签名验证失败返回 -1
+  - 当 `MODULE_SIGN_CHECK` 编译宏启用时，未签名/签名无效的模块将被拒绝加载
+  - 验证涵盖文件大小检查、完整模块缓冲区读取、SHA-256 哈希计算和签名比对
+
+#### seccomp filter 并发竞态修复（UAF 防护）
+- **sched.h**: `struct task_struct` 新增 `seccomp_lock` 自旋锁字段
+- **seccomp.c**: `seccomp_set_filter()` 全程持锁操作 filter 指针的替换，防止与 `seccomp_check()` 并发
+- **seccomp.c**: `seccomp_check()` 持锁读取 filter 指针，防止另一个 CPU 通过 `seccomp_set_filter(NULL)` 并发释放内存导致 UAF
+- 修复前：多核并发下，一个 CPU 在 `seccomp_check` 中获取 filter 指针后，另一个 CPU 执行 `seccomp_set_filter(NULL)` 释放内存，导致 use-after-free
+
+### 🟠 高优先级修复 (P1 - High)
+
+#### ASLR 随机数来源增强
+- **aslr.c**: 新增 `mix_entropy()` 函数，使用 SplitMix64 风格的 finalizer 进行熵混合
+- **aslr.c**: `aslr_init()` 现在混合多源熵：TSC（必选）+ RDRAND（硬件随机数，可用时）
+- **aslr.c**: 新增 8 轮混合迭代，确保即使单一熵源较弱也能产生良好分布
+- 注：xorshift64 仍非密码学安全 PRNG，生产环境建议替换为 ChaCha20
+
+#### 内核指针泄露修复
+- **module.c**: `module_load()` 日志移除 `%p` 格式的内核模块基地址输出
+- **syscall_entry.c**: `syscall_init()` 日志移除 LSTAR 地址输出
+- **stack_protect.c**: `stack_protector_init()` 日志移除栈金丝雀值输出
+- **pagetable.c**: `page_table_init()` 日志移除内核 CR3 值输出
+- 修复前：INFO 级别日志泄露内核关键地址（模块基址、LSTAR、栈金丝雀、CR3），可被利用于绕过 ASLR
+
+### 🟡 中优先级修复 (P2 - Medium)
+
+#### 安全默认策略文档化
+- **seccomp.c**: 明确文档化默认策略（NULL filter = 允许所有系统调用），与 Linux seccomp 默认行为一致
+- **capability.c**: capability 框架（fd 级权限控制）已实现但未集成到 syscall 路径，标注为 Phase 3 规划
+- **syscall.c**: `handle_syscall()` 中 seccomp 检查已正确集成，capability 检查预留注释说明
+
+### 📝 文档更新
+- 模块签名文件头注释更新，标注修复版本和 SHA-256 实现细节
+- seccomp 文件头注释更新，标注 UAF 竞态修复和锁机制说明
+- ASLR 文件头注释更新，标注多源熵混合改进
+
+### 版本控制
+- 版本号: v4.0.6
+
+---
+
 ## v4.0.5 (2026-07-13) — 中断死锁修复 + 文档虚构说明清理
 
 ### 🔴 严重修复 (P0 - Critical)

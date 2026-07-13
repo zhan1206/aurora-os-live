@@ -1,11 +1,18 @@
 /*
  * aslr.c - Address Space Layout Randomization implementation
  *
- * Uses a xorshift64 PRNG to generate random offsets for:
+ * Uses a xorshift64* PRNG to generate random offsets for:
  *   - User stack base (within 1GB range)
  *   - mmap base (within 1GB range)
  *
- * The PRNG is seeded at boot time via RDTSC for entropy.
+ * The PRNG is seeded at boot time from multiple entropy sources
+ * (TSC + RDRAND if available) and run through mixing rounds.
+ *
+ * FIXED (v4.0.6):
+ *   - Added multi-source entropy mixing (TSC + RDRAND)
+ *   - Added additional mixing rounds to strengthen seed
+ *   - Warning: xorshift64 is NOT cryptographically secure;
+ *     for production, replace with ChaCha20 or similar CSPRNG.
  */
 #include "aslr.h"
 #include "pagetable.h"
@@ -14,7 +21,7 @@
 #include <stddef.h>
 
 /* ================================================================
- * xorshift64 PRNG
+ * xorshift64* PRNG
  * ================================================================ */
 
 static uint64_t aslr_state = 0xDEADBEEFCAFEBABEULL;
@@ -31,6 +38,19 @@ static uint64_t xorshift64_next(void) {
 }
 
 /* ================================================================
+ * Entropy mixing
+ * ================================================================ */
+
+static uint64_t mix_entropy(uint64_t a, uint64_t b) {
+    uint64_t result = a ^ b;
+    /* SplitMix64-style finalizer for better avalanche */
+    result = (result ^ (result >> 30)) * 0xBF58476D1CE4E5B9ULL;
+    result = (result ^ (result >> 27)) * 0x94D049BB133111EBULL;
+    result = result ^ (result >> 31);
+    return result;
+}
+
+/* ================================================================
  * Initialization
  * ================================================================ */
 
@@ -39,21 +59,42 @@ void aslr_init(void) {
     asm volatile ("rdtsc" : "=a"(tsc_low), "=d"(tsc_high));
     uint64_t tsc = (tsc_high << 32) | tsc_low;
 
+    /* Try RDRAND for additional entropy (may not be available) */
+    uint64_t rdrand_val = 0;
+    int rdrand_ok = 0;
+    asm volatile (
+        "rdrand %0\n\t"
+        "setc %1"
+        : "=r"(rdrand_val), "=r"(rdrand_ok)
+        :
+        : "cc"
+    );
+
     /*
-     * Mix TSC with a fixed seed to ensure we never start from zero.
-     * TSC alone can be somewhat predictable at boot, but on real
-     * hardware it provides enough entropy for our purposes.
+     * Mix multiple entropy sources:
+     *   - TSC (always available, somewhat predictable at boot)
+     *   - RDRAND (hardware RNG, may not be available in VMs)
+     *   - Fixed constants as fallback
+     *
+     * Multiple mixing rounds ensure good distribution even if
+     * some sources are weak or unavailable.
      */
-    aslr_state = tsc ^ 0x9E3779B97F4A7C15ULL;  /* golden ratio */
-    aslr_state ^= aslr_state >> 33;
-    aslr_state *= 0xFF51AFD7ED558CCDULL;
-    aslr_state ^= aslr_state >> 33;
+    uint64_t seed = mix_entropy(tsc, 0x9E3779B97F4A7C15ULL);  /* golden ratio */
+    if (rdrand_ok) {
+        seed = mix_entropy(seed, rdrand_val);
+    }
+
+    /* Run several mixing rounds to strengthen the seed */
+    aslr_state = seed;
+    for (int i = 0; i < 8; i++) {
+        aslr_state = mix_entropy(aslr_state, xorshift64_next());
+    }
 
     /* Ensure state is non-zero (xorshift requires non-zero state) */
     if (aslr_state == 0) aslr_state = 1;
 
-    log_printf(LOG_LEVEL_INFO, "ASLR initialized (seed=%p)\n",
-               (void *)(uintptr_t)aslr_state);
+    log_printf(LOG_LEVEL_INFO, "ASLR initialized (entropy: TSC%s)\n",
+               rdrand_ok ? "+RDRAND" : " only");
 }
 
 /* ================================================================

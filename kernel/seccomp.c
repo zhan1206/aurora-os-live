@@ -10,9 +10,17 @@
  * syscall i is denied.
  *
  * Default: no filter (NULL) = all syscalls allowed.
+ *
+ * FIXED (v4.0.6):
+ *   - Added seccomp_lock spinlock to prevent UAF race between
+ *     seccomp_set_filter() and seccomp_check() on SMP systems.
+ *   - seccomp_check() now holds the lock while dereferencing
+ *     the filter pointer, preventing concurrent kfree().
  */
+
 #include "seccomp.h"
 #include "sched.h"
+#include "smp.h"
 #include "mem.h"
 #include "include/log.h"
 #include "include/errno.h"
@@ -21,57 +29,77 @@
 
 /* ================================================================
  * seccomp_set_filter
+ *
+ * Atomically installs or removes a seccomp filter for the given
+ * task. Uses seccomp_lock to prevent races with seccomp_check().
  * ================================================================ */
 
 int seccomp_set_filter(struct task_struct *task, struct seccomp_filter *filter) {
     if (!task) return -1;
 
-    /* If filter is NULL, just remove the existing filter.
-     * Use atomic pointer swap to avoid use-after-free race with
-     * seccomp_check() running on another CPU. */
+    spin_lock((spinlock_t*)&task->seccomp_lock);
+
+    /* If filter is NULL, remove the existing filter */
     if (!filter) {
-        struct seccomp_filter *old = (struct seccomp_filter *)
-            __sync_lock_test_and_set((void **)&task->seccomp, NULL);
-        if (old) kfree(old);
-        log_printf(LOG_LEVEL_INFO, "seccomp: filter removed for pid=%d\n",
-                   task->pid);
+        struct seccomp_filter *old = task->seccomp;
+        task->seccomp = NULL;
+        spin_unlock((spinlock_t*)&task->seccomp_lock);
+
+        if (old) {
+            kfree(old);
+            log_printf(LOG_LEVEL_INFO, "seccomp: filter removed for pid=%d\n",
+                       task->pid);
+        }
         return 0;
     }
 
     /* Allocate and copy the new filter */
     struct seccomp_filter *new_filter = kmalloc(sizeof(struct seccomp_filter));
-    if (!new_filter) return -1;
+    if (!new_filter) {
+        spin_unlock((spinlock_t*)&task->seccomp_lock);
+        return -1;
+    }
 
     memcpy(new_filter, filter, sizeof(struct seccomp_filter));
 
-    /* Atomically swap in the new filter, free the old one.
-     * The atomic swap ensures seccomp_check() never sees a freed pointer. */
-    struct seccomp_filter *old = (struct seccomp_filter *)
-        __sync_lock_test_and_set((void **)&task->seccomp, new_filter);
+    /* Atomically swap in the new filter under the lock */
+    struct seccomp_filter *old = task->seccomp;
+    task->seccomp = new_filter;
+    spin_unlock((spinlock_t*)&task->seccomp_lock);
+
     if (old) kfree(old);
 
-    log_printf(LOG_LEVEL_INFO, "seccomp: filter installed for pid=%d (mask=%p %p %p %p)\n",
-               task->pid,
-               (void *)(uintptr_t)new_filter->syscall_mask[0],
-               (void *)(uintptr_t)new_filter->syscall_mask[1],
-               (void *)(uintptr_t)new_filter->syscall_mask[2],
-               (void *)(uintptr_t)new_filter->syscall_mask[3]);
+    log_printf(LOG_LEVEL_INFO, "seccomp: filter installed for pid=%d\n",
+               task->pid);
 
     return 0;
 }
 
 /* ================================================================
  * seccomp_check
+ *
+ * Check if a syscall is allowed by the task's seccomp filter.
+ * Holds seccomp_lock while dereferencing the filter pointer
+ * to prevent UAF with concurrent seccomp_set_filter(NULL).
  * ================================================================ */
 
 int seccomp_check(struct task_struct *task, int syscall_num) {
     if (!task) return 0;  /* safety: allow if no task context */
 
+    spin_lock((spinlock_t*)&task->seccomp_lock);
+
     /* No filter installed: all syscalls allowed */
-    if (!task->seccomp) return 0;
+    struct seccomp_filter *filter = task->seccomp;
+    if (!filter) {
+        spin_unlock((spinlock_t*)&task->seccomp_lock);
+        return 0;
+    }
 
     /* Bounds check: syscall numbers outside 0..255 are always denied */
-    if (syscall_num < 0 || syscall_num >= 256) return -1;
+    if (syscall_num < 0 || syscall_num >= 256) {
+        spin_unlock((spinlock_t*)&task->seccomp_lock);
+        return -1;
+    }
 
     /*
      * Check the bitmap: each uint64_t covers 64 syscalls.
@@ -84,9 +112,8 @@ int seccomp_check(struct task_struct *task, int syscall_num) {
     int bit_idx  = syscall_num % 64;
     uint64_t mask = 1ULL << bit_idx;
 
-    if (task->seccomp->syscall_mask[word_idx] & mask) {
-        return 0;  /* bit is set: syscall allowed */
-    }
+    int result = (filter->syscall_mask[word_idx] & mask) ? 0 : -1;
 
-    return -1;  /* bit is clear: syscall denied */
+    spin_unlock((spinlock_t*)&task->seccomp_lock);
+    return result;
 }

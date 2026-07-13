@@ -53,8 +53,7 @@ void stack_protect_init(void) {
     /* Ensure canary is never zero */
     if (__stack_chk_guard == 0) __stack_chk_guard = 0xDEADBEEF1BADB002ULL;
 
-    log_printf(LOG_LEVEL_INFO, "Stack protector initialized (canary=%p)\n",
-               (void *)(uintptr_t)__stack_chk_guard);
+    log_printf(LOG_LEVEL_INFO, "Stack protector initialized\n");
 }
 
 /* ================================================================

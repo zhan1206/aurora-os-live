@@ -179,6 +179,53 @@ int module_load(const char *path) {
         return -1;
     }
 
+    /* ================================================================
+     * Module signature verification (FIXED v4.0.6)
+     *
+     * When MODULE_SIGN_CHECK is enabled, verify the module's signature
+     * before any ELF parsing. This prevents loading of unsigned or
+     * tampered modules.
+     * ================================================================ */
+    if (module_sign_is_enabled()) {
+        size_t file_size = f->inode->size;
+        if (file_size < MODULE_SIGN_HEADER_MIN_SIZE) {
+            log_printf(LOG_LEVEL_ERR,
+                "module_load: %s too small for signature (%zu bytes)\n",
+                path, file_size);
+            vfs_close(f);
+            return -1;
+        }
+
+        uint8_t *mod_buf = (uint8_t *)kmalloc(file_size);
+        if (!mod_buf) {
+            log_printf(LOG_LEVEL_ERR, "module_load: OOM reading %s\n", path);
+            vfs_close(f);
+            return -1;
+        }
+
+        f->offset = 0;
+        if (vfs_read(f, mod_buf, file_size) != (ssize_t)file_size) {
+            log_printf(LOG_LEVEL_ERR, "module_load: read failed for %s\n", path);
+            kfree(mod_buf);
+            vfs_close(f);
+            return -1;
+        }
+
+        int sign_result = module_sign_verify(mod_buf, file_size);
+        kfree(mod_buf);
+
+        if (sign_result != 0) {
+            log_printf(LOG_LEVEL_ERR,
+                "module_load: %s signature verification failed\n", path);
+            vfs_close(f);
+            return -1;
+        }
+
+        log_printf(LOG_LEVEL_INFO, "module_load: %s signature verified\n", path);
+        /* Reset file offset for subsequent ELF parsing */
+        f->offset = 0;
+    }
+
     /* Read ELF header */
     Elf64_Ehdr ehdr;
     f->offset = 0;
@@ -529,8 +576,8 @@ int module_load(const char *path) {
 
     mod->state = MODULE_LIVE;
 
-    log_printf(LOG_LEVEL_INFO, "module_load: %s loaded at %p, size %zu\n",
-               mod->name, mod->base, mod->size);
+    log_printf(LOG_LEVEL_INFO, "module_load: %s loaded, size %zu\n",
+               mod->name, mod->size);
     return 0;
 }
 

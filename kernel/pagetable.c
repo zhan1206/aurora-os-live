@@ -66,7 +66,7 @@ static inline void invlpg(uint64_t vaddr) {
 
 void page_table_init(void) {
     kernel_cr3 = read_cr3();
-    log_printf(LOG_LEVEL_INFO, "pagetable: kernel CR3=%p\n", (void *)(uintptr_t)kernel_cr3);
+    log_printf(LOG_LEVEL_INFO, "pagetable: kernel page tables initialized\n");
 
     uint32_t efer_lo, efer_hi;
     asm volatile ("rdmsr" : "=a"(efer_lo), "=d"(efer_hi) : "c"(0xC0000080));

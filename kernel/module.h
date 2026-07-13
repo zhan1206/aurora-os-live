@@ -167,4 +167,17 @@ struct module_info *module_export_info(void);
 /* Free the module info list returned by module_export_info(). */
 void module_info_free(struct module_info *list);
 
+/* ================================================================
+ * Module signature verification
+ * ================================================================ */
+
+/* Minimum size of a signed module (ELF data + signature header) */
+#define MODULE_SIGN_HEADER_MIN_SIZE  112
+
+/* Verify a module's cryptographic signature. */
+int module_sign_verify(const uint8_t *module_data, size_t module_size);
+
+/* Check if module signature verification is enabled at compile time. */
+int module_sign_is_enabled(void);
+
 #endif /* MODULE_H */
