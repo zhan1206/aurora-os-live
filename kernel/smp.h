@@ -112,6 +112,39 @@ static inline void spin_unlock(spinlock_t *lock) {
     asm volatile ("movl $0, %0" : "=m"(lock->locked) : : "memory");
 }
 
+/*
+ * irq_save / irq_restore: Save and restore the interrupt flag (IF).
+ * Used to protect spinlock critical sections that may be accessed
+ * from both interrupt and non-interrupt context (e.g., run queue lock).
+ *
+ * irq_save: saves RFLAGS and disables interrupts (CLI).
+ * irq_restore: restores the saved RFLAGS, which may re-enable interrupts.
+ *
+ * Nested calls are safe: each irq_save must be paired with irq_restore.
+ */
+static inline uint64_t irq_save(void) {
+    uint64_t flags;
+    asm volatile (
+        "pushfq\n\t"
+        "popq %0\n\t"
+        "cli"
+        : "=r"(flags)
+        :
+        : "memory"
+    );
+    return flags;
+}
+
+static inline void irq_restore(uint64_t flags) {
+    asm volatile (
+        "pushq %0\n\t"
+        "popfq"
+        :
+        : "r"(flags)
+        : "memory", "cc"
+    );
+}
+
 /* ================================================================
  * Ticket spinlock (fair, scalable alternative)
  * ================================================================ */

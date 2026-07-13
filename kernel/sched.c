@@ -397,11 +397,19 @@ void schedule(void) {
      * modifications from work stealing (smp_schedule) or other
      * CPUs accessing this queue. The lock is released before
      * context_switch to avoid holding it across stack switches.
+     *
+     * CRITICAL: Disable interrupts before acquiring the lock.
+     * pit_irq_c_handler() also acquires rq->lock from timer interrupt
+     * context. If we hold the lock and a timer interrupt fires on the
+     * same CPU, the interrupt handler will spin forever waiting for
+     * the lock we already hold — a self-deadlock.
      */
+    uint64_t irq_flags = irq_save();
     spin_lock(&rq->lock);
 
     if (rq->head == NULL) {
         spin_unlock(&rq->lock);
+        irq_restore(irq_flags);
         /* No tasks in this CPU's run queue — halt or try to steal */
         log_printf(LOG_LEVEL_ERR, "schedule: CPU %d has no tasks, halting\n", cpu_id);
         for (;;) asm volatile ("cli; hlt");
@@ -437,9 +445,11 @@ void schedule(void) {
             /* Only one runnable task — keep it running */
             current->state = TASK_RUNNING;
             spin_unlock(&rq->lock);
+            irq_restore(irq_flags);
             return;
         } else {
             spin_unlock(&rq->lock);
+            irq_restore(irq_flags);
             log_printf(LOG_LEVEL_ERR, "schedule: CPU %d no runnable tasks, halting\n", cpu_id);
             for (;;) asm volatile ("cli; hlt");
         }
@@ -448,6 +458,7 @@ void schedule(void) {
     if (next == current) {
         current->state = TASK_RUNNING;
         spin_unlock(&rq->lock);
+        irq_restore(irq_flags);
         return;
     }
 
@@ -493,6 +504,7 @@ void schedule(void) {
      * the new task won't know to release it, causing a deadlock.
      */
     spin_unlock(&rq->lock);
+    irq_restore(irq_flags);
 
     uint64_t new_cr3 = current->cr3;
     asm volatile ("mov %0, %%cr3" :: "r"(new_cr3) : "memory");
@@ -631,9 +643,12 @@ void do_exit_current(int code) {
     }
 
     /* Remove from run queue (SMP-safe: acquire run queue lock to prevent
-     * races with smp_schedule() which may try to steal tasks from this CPU) */
+     * races with smp_schedule() which may try to steal tasks from this CPU).
+     * CRITICAL: Disable interrupts to prevent self-deadlock with
+     * pit_irq_c_handler() which also acquires rq->lock. */
     int cpu_id = current_cpu_id();
     struct run_queue *rq = &per_cpu_rq[cpu_id];
+    uint64_t exit_irq_flags = irq_save();
     spin_lock(&rq->lock);
 
     struct task_struct *prev_node = current;
@@ -641,6 +656,7 @@ void do_exit_current(int code) {
 
     if (prev_node == current) {
         spin_unlock(&rq->lock);
+        irq_restore(exit_irq_flags);
         log_printf(LOG_LEVEL_INFO, "do_exit_current: last task exiting, halting\n");
         for (;;) asm volatile ("cli; hlt");
     }
@@ -659,6 +675,7 @@ void do_exit_current(int code) {
     if (rq->count > 0) rq->count--;
 
     spin_unlock(&rq->lock);
+    irq_restore(exit_irq_flags);
 
     /*
      * IMPORTANT: Do NOT do our own context_switch here.
@@ -870,7 +887,10 @@ void smp_schedule(int my_cpu_id) {
 
     /* Lock both queues in deterministic order (lower CPU ID first) to
      * prevent AB-BA deadlock when multiple CPUs try to steal from each
-     * other simultaneously. */
+     * other simultaneously.
+     * CRITICAL: Disable interrupts — pit_irq_c_handler() also acquires
+     * rq->lock from timer interrupt context. */
+    uint64_t smp_irq_flags = irq_save();
     if (my_cpu_id < busiest_cpu) {
         spin_lock(&my_rq->lock);
         spin_lock(&src_rq->lock);
@@ -883,6 +903,7 @@ void smp_schedule(int my_cpu_id) {
     if (my_rq->count > 1 || src_rq->count <= 1) {
         spin_unlock(&src_rq->lock);
         spin_unlock(&my_rq->lock);
+        irq_restore(smp_irq_flags);
         return;
     }
 
@@ -914,4 +935,5 @@ void smp_schedule(int my_cpu_id) {
 
     spin_unlock(&src_rq->lock);
     spin_unlock(&my_rq->lock);
+    irq_restore(smp_irq_flags);
 }

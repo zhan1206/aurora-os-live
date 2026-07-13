@@ -4,7 +4,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Lines of Code](https://img.shields.io/badge/code-~26,500%20lines-blue)](kernel/)
 [![Self Tests](https://img.shields.io/badge/tests-26/26-brightgreen)](kernel/selftest.c)
-[![Version](https://img.shields.io/badge/version-v4.0.4-blue)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-v4.0.5-blue)](CHANGELOG.md)
 
 **100% 自研代码** | 无 Linux 内核代码 | 无第三方内核组件
 
@@ -162,31 +162,6 @@ docker build -t aurora-os .
 # 运行构建并提取 ISO 产物
 docker run --rm -v $(pwd)/output:/output aurora-os
 ```
-
-### CMake Build（可选构建系统）
-
-项目同时支持 Makefile 和 CMake 两种构建系统：
-
-```bash
-# 配置并构建（Release 模式）
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build
-
-# Debug 模式
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
-cmake --build build
-
-# 生成 ISO 镜像
-cmake --build build --target iso
-
-# 在 QEMU 中运行
-cmake --build build --target run
-
-# 导出 compile_commands.json（供 clang-tidy 等工具使用）
-cmake -S . -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
-```
-
-> **注意**: Makefile 和 CMake 两种构建方式互不冲突，可根据个人偏好选用。
 
 ---
 

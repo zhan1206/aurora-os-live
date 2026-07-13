@@ -1,5 +1,25 @@
 # AuroraOS Changelog
 
+## v4.0.5 (2026-07-13) — 中断死锁修复 + 文档虚构说明清理
+
+### 🔴 严重修复 (P0 - Critical)
+- **sched.c 自死锁修复**: `schedule()`/`do_exit_current()`/`smp_schedule()` 在非中断上下文获取 `rq->lock` 时未禁用中断，若同 CPU 定时器中断触发，`pit_irq_c_handler()` 会尝试获取同一把锁，导致自旋死锁，系统彻底挂死
+  - 修复：在 `smp.h` 新增 `irq_save()`/`irq_restore()` 内联函数（`pushfq`/`cli` + `popfq`）
+  - 修复：`sched.c` 三处持锁点（`schedule()`、`do_exit_current()`、`smp_schedule()`）均添加关中断保护
+
+### 📝 文档修复 (Documentation)
+- **README.md**: 删除虚构的 "CMake Build" 章节（第166-189行），项目根目录无 `CMakeLists.txt`，该说明完全无法执行
+
+### ✅ 复审确认
+- **vfs.c 引用计数**: v4.0.3 回退修复正确，每次 `vfs_open` 递增 refcount 对应 `vfs_close` 递减，自然平衡
+- **Slab 扩容竞态**: `growing` 标志在持有 `slab_lock` 期间设置/清除，无误报
+- **console.c 丢字符**: 满缓冲时丢弃为刻意行为，无误报
+
+### 版本控制
+- 版本号: v4.0.5
+
+---
+
 ## v4.0.4 (2026-07-13) — 全面安全审计 + 合规性验证
 
 ### 🔒 安全审计 (Security Audit)
