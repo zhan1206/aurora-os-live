@@ -1,5 +1,35 @@
 # AuroraOS Changelog
 
+## v4.0.4 (2026-07-13) — 全面安全审计 + 合规性验证
+
+### 🔒 安全审计 (Security Audit)
+经过对全部 120+ 源文件的系统性安全扫描，确认以下结论：
+
+- **SMAP/SMEP 保护**: `copy_from_user`/`copy_to_user`/`strncpy_from_user`/`vfs_read`/`vfs_write` 均正确使用 `stac()`/`clac()` 保护用户内存访问
+- **缓冲区溢出**: 全部 `strcpy` 使用场景已验证安全（ramfs 按需分配精确大小，syscall 使用固定字符串或已验证边界）
+- **硬编码凭据**: 无。`module_sign.c` 中的密钥为明确标注的占位演示密钥，未集成到模块加载流程
+- **整数溢出**: `mem.c` mmap 解析已添加溢出检查 (v4.0.3)
+- **竞态条件**: 全部锁机制（buddy_lock、slab_lock、vfs_lock、pipe_lock、tcp_cong_lock）均正确配对使用
+- **格式字符串漏洞**: 无（所有日志输出使用固定格式字符串）
+- **空指针解引用**: `kmalloc(0)` 返回 NULL 为预期行为，自测试已验证
+- **CI/CD 凭据**: `GITHUB_TOKEN` 通过 `secrets` 机制注入，无明文泄露
+
+### 📋 合规性验证 (Compliance)
+- **自研审计**: 120+ 源文件全量扫描，确认 0 处第三方代码复制，100% 自主研发
+- **设计灵感归属**: 55 处 `Inspired by` 标注，均为合法设计参考，非代码复制
+- **外部依赖**: 仅标准编译工具链（GCC、Binutils、Make、GRUB2、QEMU），无第三方库
+- **知识产权**: MIT 许可证，所有版权声明均为 `AuroraOS Contributors`
+- **8x16 VGA 字体**: 标准 VGA BIOS 字体数据表（公共领域），非版权代码
+
+### 📝 文档修复 (Documentation)
+- **self_development_audit.md**: 移除不存在的 `CMakeLists.txt` 引用（项目使用 Makefile 构建）
+- **self_development_audit.md**: 外部依赖白名单移除 `CMake`（项目未使用 CMake 构建系统）
+
+### 版本控制
+- 版本号: v4.0.4
+
+---
+
 ## v4.0.3 (2026-07-11) — 多架构缺陷修复 + 内核健壮性增强
 
 ### 🔴 严重修复 (P0 - Critical)

@@ -4,7 +4,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Lines of Code](https://img.shields.io/badge/code-~26,500%20lines-blue)](kernel/)
 [![Self Tests](https://img.shields.io/badge/tests-26/26-brightgreen)](kernel/selftest.c)
-[![Version](https://img.shields.io/badge/version-v4.0.3-blue)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-v4.0.4-blue)](CHANGELOG.md)
 
 **100% 自研代码** | 无 Linux 内核代码 | 无第三方内核组件
 

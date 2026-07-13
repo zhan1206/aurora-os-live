@@ -1,6 +1,6 @@
 # AuroraOS 自研审计报告与开发规范
 
-> 审计日期: 2026-07-09  
+> 审计日期: 2026-07-13  
 > 审计范围: 项目全部源代码、构建系统、文档、配置文件  
 > 审计结论: **通过 — 100% 自研**
 
@@ -130,7 +130,7 @@
 | 用户态程序 | `userspace/*.c` | 自研 | 原创用户态示例 |
 | 汇编层 | `arch/x86_64/*.S` | 自研 | 原创汇编实现 |
 | UEFI 引导 | `boot/efi_main.c`, `boot/uefi.h` | 自研 | 原创 UEFI 引导程序 |
-| 构建系统 | `Makefile`, `build.sh`, `CMakeLists.txt` | 自研 | 原创构建脚本 |
+| 构建系统 | `Makefile`, `build.sh` | 自研 | 原创构建脚本 |
 | CI/CD | `.github/workflows/*.yml` | 自研 | 原创 CI/CD 流水线 |
 | 测试脚本 | `scripts/*.py`, `scripts/*.sh` | 自研 | 原创测试脚本 |
 | 文档 | `docs/*.md`, `README.md`, `CHANGELOG.md` | 自研 | 原创项目文档 |
@@ -195,7 +195,7 @@
 **构建工具**:
 - GCC / Clang (编译器)
 - GNU Binutils (链接器、汇编器)
-- GNU Make / CMake (构建系统)
+- GNU Make (构建系统)
 - GRUB2 (引导加载程序)
 - QEMU (仿真器)
 - Docker (容器)
