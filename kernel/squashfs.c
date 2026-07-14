@@ -655,6 +655,11 @@ static int squashfs_read_inode_raw(struct squashfs_sb_info *sbi,
         info->block_list = NULL;
 
         if (num_blocks > 0) {
+            /* Bounds check: ensure block list fits within metadata buffer */
+            if (sizeof(struct squashfs_reg_inode) + num_blocks * 4 > meta_size) {
+                kfree(meta);
+                return -EIO;
+            }
             info->block_list = (uint32_t *)kmalloc(num_blocks * sizeof(uint32_t));
             if (info->block_list) {
                 uint8_t *blist = meta + sizeof(struct squashfs_reg_inode);
@@ -687,6 +692,11 @@ static int squashfs_read_inode_raw(struct squashfs_sb_info *sbi,
         info->block_list = NULL;
 
         if (num_blocks > 0) {
+            /* Bounds check: ensure block list fits within metadata buffer */
+            if (sizeof(struct squashfs_lreg_inode) + num_blocks * 4 > meta_size) {
+                kfree(meta);
+                return -EIO;
+            }
             info->block_list = (uint32_t *)kmalloc(num_blocks * sizeof(uint32_t));
             if (info->block_list) {
                 uint8_t *blist = meta + sizeof(struct squashfs_lreg_inode);
@@ -782,6 +792,7 @@ static int squashfs_read_directory(struct squashfs_sb_info *sbi,
     uint32_t dir_size = info->file_size;
     uint64_t meta_offset = info->start_block;
     uint32_t offset = info->fragment_offset;
+    if (offset >= dir_size) return -EINVAL;
     uint32_t remaining = dir_size - offset;
 
     /* Read the directory data from metadata */
@@ -813,8 +824,8 @@ static int squashfs_read_directory(struct squashfs_sb_info *sbi,
 
         cur_offset += 2 + meta_size;  /* 2-byte header + data */
         if (meta_size < 8192 && read_pos < remaining) {
-            /* This was the last metadata block */
-            cur_offset = 0; /* reset offset tracking */
+            /* This was the last metadata block — no more data to read */
+            break;
         }
         kfree(block);
     }
@@ -824,6 +835,10 @@ static int squashfs_read_directory(struct squashfs_sb_info *sbi,
     while (pos + sizeof(struct squashfs_dir_header) <= remaining) {
         struct squashfs_dir_header *dh =
             (struct squashfs_dir_header *)(dir_data + pos);
+        if (dh->count == 0) {
+            pos += sizeof(struct squashfs_dir_header);
+            continue;
+        }
         uint32_t count = dh->count - 1;
         uint32_t dir_start = dh->start_block;
 
@@ -957,7 +972,12 @@ static ssize_t squashfs_read_file(struct squashfs_sb_info *sbi,
                                                        csize, &uncomp_size);
         if (!block_data) return total_read > 0 ? (ssize_t)total_read : -EIO;
 
-        size_t chunk = (size_t)(uncomp_size - block_off);
+        size_t chunk;
+        if (block_off >= uncomp_size) {
+            kfree(block_data);
+            break;
+        }
+        chunk = (size_t)(uncomp_size - block_off);
         if (chunk > count - total_read) chunk = count - total_read;
 
         memcpy(buf + total_read, block_data + block_off, chunk);

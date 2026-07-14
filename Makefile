@@ -52,7 +52,7 @@ GIT_HASH   := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 BUILD_TYPE ?= release
 
 CFLAGS_BASE := -ffreestanding -Wall -Wextra -fno-pic -fstack-protector-strong -mno-sse \
-               -mgeneral-regs-only -Ikernel/include -std=gnu17 \
+               -mgeneral-regs-only -mno-red-zone -Ikernel/include -std=gnu17 \
                -DBUILD_DATE="\"$(BUILD_DATE)\"" -DGIT_HASH="\"$(GIT_HASH)\"" \
                -DBUILD_TYPE="\"$(BUILD_TYPE)\""
 

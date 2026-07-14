@@ -28,6 +28,7 @@ struct sysfs_entry {
     sysfs_read_fn  read_fn;
     struct sysfs_entry *children;  /* linked list */
     struct sysfs_entry *next;
+    struct inode   *cached_inode;  /* cached inode to avoid re-allocation */
 };
 
 /* ================================================================
@@ -54,7 +55,15 @@ static int sysfs_read(struct file *filp, void *buf, size_t count, off_t *offset)
     size_t toread = count;
     if ((size_t)(*offset) + toread > (size_t)len)
         toread = (size_t)len - (size_t)(*offset);
-    memcpy(buf, tmp + (*offset), toread);
+    {
+        uint64_t saved_rflags;
+        asm volatile ("pushfq; popq %0" : "=r"(saved_rflags));
+        asm volatile ("stac" ::: "memory");
+        memcpy(buf, tmp + (*offset), toread);
+        if (!(saved_rflags & (1ULL << 18))) {
+            asm volatile ("clac" ::: "memory");
+        }
+    }
     *offset += (off_t)toread;
     return (ssize_t)toread;
 }
@@ -80,6 +89,13 @@ static int sysfs_lookup(struct inode *dir, struct dentry *dentry) {
     struct sysfs_entry *child = d->entry->children;
     while (child) {
         if (child->name && strcmp(child->name, dentry->name) == 0) {
+            /* Return cached inode if available to avoid memory leak */
+            if (child->cached_inode) {
+                child->cached_inode->dentry = dentry;
+                dentry->inode = child->cached_inode;
+                return 0;
+            }
+
             /* Create inode for this entry on the fly */
             struct inode *inode = (struct inode *)kmalloc(sizeof(*inode));
             if (!inode) return -1;
@@ -98,6 +114,7 @@ static int sysfs_lookup(struct inode *dir, struct dentry *dentry) {
             inode->ops    = child->is_dir ? &sysfs_dir_ops : &sysfs_file_ops;
             inode->dentry = dentry;
 
+            child->cached_inode = inode;
             dentry->inode = inode;
             return 0;
         }

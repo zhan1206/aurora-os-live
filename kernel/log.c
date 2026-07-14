@@ -92,6 +92,10 @@ void log_vprintf(int level, const char *fmt, va_list ap) {
     while (*p && n < (int)sizeof(buf) - 1) {
         if (*p == '%') {
             p++;
+            /* Handle length modifiers: hh, h, l, ll */
+            int long_mod = 0;  /* 0=none, 1=l, 2=ll */
+            if (*p == 'l') { p++; long_mod = 1; }
+            if (*p == 'l') { p++; long_mod = 2; }
             if (*p == 's') {
                 const char *s = va_arg(ap, const char *);
                 if (!s) s = "(null)";
@@ -100,19 +104,37 @@ void log_vprintf(int level, const char *fmt, va_list ap) {
                 char c = (char)va_arg(ap, int);
                 buf[n++] = c;
             } else if (*p == 'd') {
-                int v = va_arg(ap, int);
+                int64_t v;
+                if (long_mod == 2)      v = va_arg(ap, int64_t);
+                else if (long_mod == 1) v = va_arg(ap, long);
+                else                    v = va_arg(ap, int);
                 if (v == 0) { buf[n++] = '0'; }
                 else {
                     char tmp[32]; int tn = 0; int neg = v < 0;
-                    /* Avoid undefined behavior when v == INT_MIN:
+                    /* Avoid undefined behavior when v == INT64_MIN:
                      * -v would overflow, so use unsigned arithmetic */
-                    unsigned int uv = neg ? (unsigned int)(-(v + 1)) + 1U : (unsigned int)v;
+                    uint64_t uv = neg ? (uint64_t)(-(v + 1)) + 1ULL : (uint64_t)v;
                     while (uv && tn < (int)sizeof(tmp)) { tmp[tn++] = '0' + (uv % 10); uv /= 10; }
                     if (neg) tmp[tn++] = '-';
                     for (int i = tn - 1; i >= 0; --i) buf[n++] = tmp[i];
                 }
+            } else if (*p == 'u') {
+                uint64_t v;
+                if (long_mod == 2)      v = va_arg(ap, uint64_t);
+                else if (long_mod == 1) v = va_arg(ap, unsigned long);
+                else                    v = va_arg(ap, unsigned int);
+                char tmp[32]; int tn = 0;
+                if (v == 0) tmp[tn++] = '0';
+                while (v && tn < (int)sizeof(tmp)) {
+                    tmp[tn++] = '0' + (v % 10);
+                    v /= 10;
+                }
+                for (int i = tn - 1; i >= 0; --i) buf[n++] = tmp[i];
             } else if (*p == 'x' || *p == 'p') {
-                unsigned long v = va_arg(ap, unsigned long);
+                uint64_t v;
+                if (long_mod == 2)      v = va_arg(ap, uint64_t);
+                else if (long_mod == 1) v = va_arg(ap, unsigned long);
+                else                    v = va_arg(ap, unsigned long);
                 char tmp[32]; int tn = 0;
                 if (v == 0) tmp[tn++] = '0';
                 while (v && tn < (int)sizeof(tmp)) {

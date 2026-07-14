@@ -33,19 +33,26 @@ int do_sys_kill(int pid, int sig) {
 
     log_printf(LOG_LEVEL_DEBUG, "signal: kill(pid=%d, sig=%d)\n", pid, sig);
 
+    spin_lock(&signal_lock);
+
     if (target->sig) {
         target->sig->pending |= (1U << sig);
     } else {
         target->sig = signal_alloc();
-        if (!target->sig) return -1;
+        if (!target->sig) {
+            spin_unlock(&signal_lock);
+            return -1;
+        }
         target->sig->pending |= (1U << sig);
     }
 
-    spin_lock(&signal_lock);
     if (target->state == TASK_BLOCKED) {
-        if (sig == SIGKILL ||
-            (target->sig->actions[sig].sa_handler != SIG_IGN)) {
-            target->state = TASK_READY;
+        /* Don't wake a blocked task if the signal is in its blocked mask */
+        if (!(target->sig->blocked & (1U << sig))) {
+            if (sig == SIGKILL ||
+                (target->sig->actions[sig].sa_handler != SIG_IGN)) {
+                target->state = TASK_READY;
+            }
         }
     }
     spin_unlock(&signal_lock);

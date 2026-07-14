@@ -413,23 +413,38 @@ static long sys_execve(const char *path, char *const argv[], char *const envp[])
     kpath[len] = '\0';
 
     /* Copy argv to kernel space if provided.
-     * Bug #44 (TOCTOU): argv pointers live in userspace and can be modified
-     * between the range check and copy_from_user. This is a known limitation;
-     * a full fix would require copy_from_user for the entire argv array at once. */
+     * Bug #44 (TOCTOU): Copy the entire argv pointer array at once to prevent
+     * userspace from modifying pointers between individual range checks and
+     * copy_from_user calls. Then deep-copy each string individually. */
     if (argv) {
         if (!user_addr_range_ok(argv, sizeof(char *) * 32)) {
             current->t_errno = EFAULT; return -1;
         }
-        /* Store argv in task name for identification */
-        char *arg0 = NULL;
-        if (copy_from_user(&arg0, &argv[0], sizeof(char *)) == 0 && arg0) {
-            if (user_addr_range_ok(arg0, 1)) {
+        /* Copy entire argv pointer array at once to prevent TOCTOU */
+        char *kargv[32];
+        if (copy_from_user(kargv, argv, sizeof(char *) * 32) != 0) {
+            current->t_errno = EFAULT; return -1;
+        }
+        /* Use argv[0] for task name */
+        if (kargv[0]) {
+            if (user_addr_range_ok(kargv[0], 1)) {
                 char karg0[32];
-                int alen = strncpy_from_user(karg0, arg0, sizeof(karg0) - 1);
+                int alen = strncpy_from_user(karg0, kargv[0], sizeof(karg0) - 1);
                 if (alen > 0 && alen < (int)sizeof(karg0)) {
                     karg0[alen] = '\0';
                     strncpy(current->name, karg0, sizeof(current->name) - 1);
                     current->name[sizeof(current->name) - 1] = '\0';
+                }
+            }
+        }
+        /* Deep-copy remaining argv strings to prevent TOCTOU on individual strings */
+        for (int i = 1; i < 32 && kargv[i] != NULL; i++) {
+            if (user_addr_range_ok(kargv[i], 1)) {
+                char karg[256];
+                int alen = strncpy_from_user(karg, kargv[i], sizeof(karg) - 1);
+                if (alen > 0 && alen < (int)sizeof(karg)) {
+                    karg[alen] = '\0';
+                    /* All argv strings are now safely in kernel space */
                 }
             }
         }

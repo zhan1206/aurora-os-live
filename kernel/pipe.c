@@ -57,6 +57,8 @@ struct pipe_ring {
     int      read_open;   /* read end still open? */
     int      write_open;  /* write end still open? */
     volatile uint32_t lock;  /* spinlock for SMP safety */
+    struct task_struct *blocked_reader;  /* task blocked on read (wakeup target) */
+    struct task_struct *blocked_writer;  /* task blocked on write (wakeup target) */
 };
 
 /* ================================================================
@@ -90,8 +92,13 @@ static ssize_t pipe_read(struct file *filp, void *buf, size_t count,
 
         if (!current) return -1;
         if (current->sig && current->sig->pending) { current->t_errno = EINTR; return -1; }
+        /* Mark ourselves as blocked reader, then block */
+        pipe_spin_lock(&ring->lock);
+        ring->blocked_reader = current;
+        pipe_spin_unlock(&ring->lock);
         current->state = TASK_BLOCKED;
         schedule();
+        /* After wakeup, re-acquire lock and re-check */
     }
 
     /* Read from ring buffer (lock still held) */
@@ -110,6 +117,12 @@ static ssize_t pipe_read(struct file *filp, void *buf, size_t count,
     }
     ring->head = (ring->head + toread) % PIPE_BUF_SIZE;
     ring->count -= (uint32_t)toread;
+
+    /* Wake a blocked writer now that we've freed some space */
+    if (ring->blocked_writer && ring->blocked_writer->state == TASK_BLOCKED) {
+        ring->blocked_writer->state = TASK_READY;
+        ring->blocked_writer = NULL;
+    }
 
     pipe_spin_unlock(&ring->lock);
     return (ssize_t)toread;
@@ -145,6 +158,10 @@ static ssize_t pipe_write(struct file *filp, const void *buf, size_t count,
 
             if (!current) return -1;
             if (current->sig && current->sig->pending) { current->t_errno = EINTR; return -1; }
+            /* Mark ourselves as blocked writer, then block */
+            pipe_spin_lock(&ring->lock);
+            ring->blocked_writer = current;
+            pipe_spin_unlock(&ring->lock);
             current->state = TASK_BLOCKED;
             schedule();
         }
@@ -166,6 +183,12 @@ static ssize_t pipe_write(struct file *filp, const void *buf, size_t count,
         }
         ring->tail = (ring->tail + towrite) % PIPE_BUF_SIZE;
         ring->count += (uint32_t)towrite;
+
+        /* Wake a blocked reader now that we've written some data */
+        if (ring->blocked_reader && ring->blocked_reader->state == TASK_BLOCKED) {
+            ring->blocked_reader->state = TASK_READY;
+            ring->blocked_reader = NULL;
+        }
 
         pipe_spin_unlock(&ring->lock);
         total += towrite;

@@ -8,6 +8,9 @@
 #include <stdint.h>
 
 static struct block_device *block_dev_list = NULL;
+/* NOTE: block_dev_list is only modified during boot-time device registration.
+ * No runtime synchronization is needed since all block devices are registered
+ * before the scheduler starts and no concurrent lookups occur during init. */
 
 int block_dev_register(struct block_device *bdev) {
     if (!bdev) return -1;

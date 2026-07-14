@@ -65,6 +65,7 @@ static inline int current_cpu_id(void) {
 #define PID_BITMAP_WORDS  (MAX_PID / 64)  /* 128 uint64_t entries */
 static uint64_t pid_bitmap[PID_BITMAP_WORDS];
 static int next_pid = 2;  /* 0=idle, 1=init, user tasks start at 2 */
+static spinlock_t pid_lock = {0};  /* protects PID bitmap allocation */
 
 /* PID → task_struct lookup table (O(1) instead of O(n) scan) */
 static struct task_struct *pid_table[MAX_PID];
@@ -82,6 +83,8 @@ static inline int pid_test_bit(int pid) {
 }
 
 static int alloc_pid(void) {
+    spin_lock(&pid_lock);
+
     /* Reserve pid 0 and 1 */
     pid_set_bit(0);
     pid_set_bit(1);
@@ -92,17 +95,21 @@ static int alloc_pid(void) {
         next_pid = (pid + 1 >= MAX_PID) ? 2 : pid + 1;
         if (!pid_test_bit(pid)) {
             pid_set_bit(pid);
+            spin_unlock(&pid_lock);
             return pid;
         }
     }
+    spin_unlock(&pid_lock);
     return -1;  /* PID space exhausted */
 }
 
 static void free_pid(int pid) {
+    spin_lock(&pid_lock);
     if (pid >= 2 && pid < MAX_PID) {
         pid_clear_bit(pid);
         pid_table[pid] = NULL;  /* clear O(1) lookup entry */
     }
+    spin_unlock(&pid_lock);
 }
 
 /* Register a task in the O(1) lookup table */
@@ -119,7 +126,7 @@ static inline void pid_register(int pid, struct task_struct *t) {
 struct task_struct *find_task_by_pid(int pid) {
     if (pid < 0 || pid >= MAX_PID) return NULL;
     struct task_struct *t = pid_table[pid];
-    if (t && t->state != TASK_DEAD) return t;
+    if (t && t->state != TASK_DEAD && t->state != TASK_ZOMBIE) return t;
     return NULL;
 }
 
@@ -355,8 +362,12 @@ struct task_struct *create_task(void (*fn)(void)) {
     int target_cpu = t->pid % num_cpus;
     if (target_cpu >= num_cpus) target_cpu = 0;
 
-    /* Add to the target CPU's run queue */
+    /* Add to the target CPU's run queue.
+     * CRITICAL: Acquire rq->lock with IRQ disabled to prevent races
+     * with the timer interrupt handler which also modifies the queue. */
     struct run_queue *rq = &per_cpu_rq[target_cpu];
+    uint64_t create_irq_flags = irq_save();
+    spin_lock(&rq->lock);
     if (rq->head == NULL) {
         t->next = t;
         rq->head = t;
@@ -368,6 +379,8 @@ struct task_struct *create_task(void (*fn)(void)) {
     /* Also insert into red-black tree for O(log n) scheduling */
     t->rb_node.key = t->vruntime;
     rb_insert(&rq->ready_tree, &t->rb_node);
+    spin_unlock(&rq->lock);
+    irq_restore(create_irq_flags);
     add_child(current, t);
 
     log_printf(LOG_LEVEL_INFO, "Created task pid=%d on CPU %d\n", t->pid, target_cpu);
@@ -485,9 +498,18 @@ void schedule(void) {
     /* Update min_vruntime: track the minimum vruntime across all ready tasks.
      * The scheduled task (next) has the minimum vruntime among ready tasks
      * (we selected it that way). But don't let min_vruntime decrease — use
-     * max() to ensure monotonic progression. */
-    if (next->vruntime > min_vruntime) {
-        min_vruntime = next->vruntime;
+     * max() to ensure monotonic progression.
+     *
+     * NOTE: min_vruntime is updated atomically via CAS loop for SMP safety.
+     * The read at line 345 (new task vruntime init) is a single 64-bit load
+     * and is naturally atomic on x86_64 where 64-bit aligned reads are atomic. */
+    {
+        uint64_t old, new_val;
+        do {
+            old = min_vruntime;
+            if (next->vruntime <= old) break;
+            new_val = next->vruntime;
+        } while (!__sync_bool_compare_and_swap(&min_vruntime, old, new_val));
     }
 
     next->state = TASK_RUNNING;

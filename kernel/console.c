@@ -306,16 +306,42 @@ static void update_hw_cursor(void) {
 }
 
 /* ================================================================
+ * VGA/framebuffer output spinlock
+ *
+ * Protects all writes to the VGA buffer and framebuffer from
+ * concurrent access on multi-CPU systems. Without this lock,
+ * simultaneous console output from multiple cores can cause
+ * screen corruption.
+ * ================================================================ */
+typedef struct {
+    volatile uint32_t locked;
+} spinlock_t;
+
+static spinlock_t console_out_lock = {0};
+
+static inline void console_out_lock_acquire(void) {
+    while (1) {
+        uint32_t old = 0, new = 1;
+        asm volatile (
+            "lock cmpxchgl %2, %1"
+            : "=a"(old), "+m"(console_out_lock.locked)
+            : "r"(new), "0"(old)
+            : "memory"
+        );
+        if (old == 0) break;
+        asm volatile ("pause" ::: "memory");
+    }
+}
+
+static inline void console_out_lock_release(void) {
+    asm volatile ("movl $0, %0" : "=m"(console_out_lock.locked) : : "memory");
+}
+
+/* ================================================================
  * Cell operations
  * ================================================================ */
-/*
- * NOTE: put_cell_raw and scroll_up write directly to VGA/framebuffer
- * hardware without a lock. On multi-CPU systems this can cause screen
- * corruption due to concurrent access. This is a known limitation for
- * single-CPU systems; multi-CPU support would require a spinlock around
- * these output functions.
- */
 static void put_cell_raw(int r, int c, char ch, uint8_t attr) {
+    console_out_lock_acquire();
     if (g_use_fb) {
         /* Convert VGA attribute to framebuffer colors */
         uint8_t fg_idx = attr & 0x0F;

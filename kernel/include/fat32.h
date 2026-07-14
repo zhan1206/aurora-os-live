@@ -151,6 +151,9 @@ struct fat32_inode_info {
     uint32_t file_size;            /* File size in bytes */
     uint8_t  attributes;           /* FAT attributes */
     uint8_t  is_dir;               /* 1 if directory */
+    /* Bug #20: Track parent directory entry position for file size updates */
+    uint32_t parent_cluster;       /* Cluster of parent directory containing this entry */
+    uint32_t dir_entry_offset;     /* Byte offset within parent cluster of this entry */
 };
 
 /* ================================================================

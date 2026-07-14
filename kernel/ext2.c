@@ -19,6 +19,7 @@
 #include "include/log.h"
 #include "include/errno.h"
 #include "mem.h"
+#include "smp.h"
 #include <string.h>
 
 /* ================================================================
@@ -311,8 +312,30 @@ static int ext2_write_data_block(struct ext2_sb_info *sbi,
  * Allocate a new block (simplified: just returns the next free block).
  * In a real implementation this would search the block bitmap.
  * For now, we use a simple counter.
+ * Protected by ext2_alloc_lock for SMP safety.
  */
+static spinlock_t ext2_alloc_lock_ = {0};
+
+static inline void ext2_alloc_lock(void) {
+    while (1) {
+        uint32_t old = 0, new = 1;
+        asm volatile (
+            "lock cmpxchgl %2, %1"
+            : "=a"(old), "+m"(ext2_alloc_lock_.locked)
+            : "r"(new), "0"(old)
+            : "memory"
+        );
+        if (old == 0) break;
+        asm volatile ("pause" ::: "memory");
+    }
+}
+
+static inline void ext2_alloc_unlock(void) {
+    asm volatile ("movl $0, %0" : "=m"(ext2_alloc_lock_.locked) : : "memory");
+}
+
 static uint32_t ext2_alloc_block(struct ext2_sb_info *sbi) {
+    ext2_alloc_lock();
     /* Find the last allocated block by scanning block bitmaps */
     /* This is a simplistic approach — for real use, maintain free lists */
     uint32_t group = 0;
@@ -321,10 +344,11 @@ static uint32_t ext2_alloc_block(struct ext2_sb_info *sbi) {
             /* Read the block bitmap to find a free block */
             uint32_t bitmap_block = sbi->gd[group].bg_block_bitmap;
             uint8_t *bitmap = (uint8_t *)kmalloc(sbi->block_size);
-            if (!bitmap) return 0;
+            if (!bitmap) { ext2_alloc_unlock(); return 0; }
 
             if (read_block(sbi->bdev, sbi->block_size, bitmap_block, bitmap) < 0) {
                 kfree(bitmap);
+                ext2_alloc_unlock();
                 return 0;
             }
 
@@ -340,12 +364,14 @@ static uint32_t ext2_alloc_block(struct ext2_sb_info *sbi) {
                     sbi->gd[group].bg_free_blocks_count--;
                     found = group * sbi->blocks_per_group + i + sbi->first_data_block;
                     kfree(bitmap);
+                    ext2_alloc_unlock();
                     return found;
                 }
             }
             kfree(bitmap);
         }
     }
+    ext2_alloc_unlock();
     return 0; /* no free blocks */
 }
 
@@ -353,15 +379,17 @@ static uint32_t ext2_alloc_block(struct ext2_sb_info *sbi) {
  * Allocate a new inode.
  */
 static uint32_t ext2_alloc_inode(struct ext2_sb_info *sbi) {
+    ext2_alloc_lock();
     uint32_t group;
     for (group = 0; group < sbi->num_groups; group++) {
         if (sbi->gd[group].bg_free_inodes_count > 0) {
             uint32_t bitmap_block = sbi->gd[group].bg_inode_bitmap;
             uint8_t *bitmap = (uint8_t *)kmalloc(sbi->block_size);
-            if (!bitmap) return 0;
+            if (!bitmap) { ext2_alloc_unlock(); return 0; }
 
             if (read_block(sbi->bdev, sbi->block_size, bitmap_block, bitmap) < 0) {
                 kfree(bitmap);
+                ext2_alloc_unlock();
                 return 0;
             }
 
@@ -374,12 +402,14 @@ static uint32_t ext2_alloc_inode(struct ext2_sb_info *sbi) {
                     write_block(sbi->bdev, sbi->block_size, bitmap_block, bitmap);
                     sbi->gd[group].bg_free_inodes_count--;
                     kfree(bitmap);
+                    ext2_alloc_unlock();
                     return group * sbi->inodes_per_group + i + 1;
                 }
             }
             kfree(bitmap);
         }
     }
+    ext2_alloc_unlock();
     return 0;
 }
 
@@ -897,8 +927,10 @@ struct inode *ext2_create(struct super_block *sb, struct inode *dir,
                     new_de->file_type = (mode & EXT2_S_IFDIR) ? EXT2_FT_DIR : EXT2_FT_REG_FILE;
                     memcpy(new_de->name, name, name_len);
 
-                    write_block(sbi->bdev, block_size,
-                                dir_info->raw.i_block[last_block_idx], block_buf);
+                    if (write_block(sbi->bdev, block_size,
+                                dir_info->raw.i_block[last_block_idx], block_buf) < 0) {
+                        goto out_free_inode;
+                    }
                     found_slot = 1;
                     break;
                 }

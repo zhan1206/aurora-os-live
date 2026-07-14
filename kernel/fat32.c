@@ -266,7 +266,7 @@ static ssize_t fat32_transfer_file(struct fat32_sb_info *sbi,
 
     /* For write: extend chain if needed */
     if (is_write && offset + count > (uint64_t)max_offset) {
-        uint32_t needed_clusters = (uint32_t)((offset + count + cluster_size - 1) /
+        uint32_t needed_clusters = (uint32_t)(((uint64_t)offset + count + cluster_size - 1) /
                                               cluster_size);
         uint32_t last_cluster = start_cluster;
         /* Find last cluster in chain */
@@ -531,7 +531,9 @@ static int fat32_find_entry(struct fat32_sb_info *sbi,
                             uint32_t *out_first_cluster,
                             uint32_t *out_file_size,
                             uint8_t *out_attr,
-                            char **out_name) {
+                            char **out_name,
+                            uint32_t *out_dir_cluster,
+                            uint32_t *out_dir_offset) {
     uint32_t cluster_size = sbi->cluster_size;
     uint32_t entries_per_cluster = cluster_size / sizeof(struct fat32_dir_entry);
     size_t name_len = strlen(name);
@@ -632,6 +634,11 @@ static int fat32_find_entry(struct fat32_sb_info *sbi,
                     }
                     *out_name = nm;
                 }
+                /* Bug #20: Return the directory entry position for file size updates */
+                if (out_dir_cluster)
+                    *out_dir_cluster = cluster;
+                if (out_dir_offset)
+                    *out_dir_offset = i * sizeof(struct fat32_dir_entry);
 
                 kfree(cluster_buf);
                 return 0;
@@ -1087,7 +1094,8 @@ int fat32_rmdir(struct fat32_sb_info *sbi, uint32_t parent_cluster,
 
     int ret = fat32_find_entry(sbi, parent_cluster, 0, name,
                                &found_entry, &found_cluster,
-                               &found_size, &found_attr, NULL);
+                               &found_size, &found_attr, NULL,
+                               NULL, NULL);
     if (ret < 0) return ret;
 
     /* Must be a directory */
@@ -1165,6 +1173,10 @@ int fat32_rmdir(struct fat32_sb_info *sbi, uint32_t parent_cluster,
 
                 if (fc == found_cluster && (de->attr & ATTR_DIRECTORY)) {
                     /* Mark as deleted */
+                    /* NOTE: Known TOCTOU limitation — the LFN entries
+                     * preceding this entry are not cleared. This is safe
+                     * for single-threaded operations but may leave stale
+                     * LFN entries visible in multi-threaded scenarios. */
                     raw[0] = 0xE5;
                     if (write_cluster(sbi, cluster, cluster_buf) < 0) {
                         kfree(cluster_buf);
@@ -1323,13 +1335,22 @@ static ssize_t fat32_file_write(struct file *filp, const void *buf, size_t count
         info->file_size = new_size;
         filp->inode->size = (size_t)new_size;
 
-        /* FIXME: Update the directory entry with the new file size.
-         * The parent directory cluster is not tracked in fat32_inode_info,
-         * so we cannot locate the directory entry on disk to update its
-         * file_size field. After unmount/remount, the file size will be
-         * lost. To fix this, add a parent_cluster/dir_entry_offset field
-         * to fat32_inode_info and set it during fat32_dir_lookup, then
-         * use write_cluster() to update the entry's file_size here. */
+        /* Bug #20: Update the directory entry with the new file size.
+         * We use the parent_cluster and dir_entry_offset tracked in
+         * fat32_inode_info to locate the directory entry on disk. */
+        if (info->parent_cluster >= 2 && info->parent_cluster < FAT32_CLUSTER_EOC_MIN) {
+            uint32_t cluster_size = sbi->cluster_size;
+            uint8_t *dir_buf = (uint8_t *)kmalloc(cluster_size);
+            if (dir_buf) {
+                if (read_cluster(sbi, info->parent_cluster, dir_buf) >= 0) {
+                    struct fat32_dir_entry *de =
+                        (struct fat32_dir_entry *)(dir_buf + info->dir_entry_offset);
+                    de->file_size = new_size;
+                    write_cluster(sbi, info->parent_cluster, dir_buf);
+                }
+                kfree(dir_buf);
+            }
+        }
     }
     return ret;
 }
@@ -1357,10 +1378,13 @@ static int fat32_dir_lookup(struct inode *dir, struct dentry *dentry) {
     uint32_t found_size = 0;
     uint8_t  found_attr = 0;
     char *resolved_name = NULL;
+    uint32_t dir_entry_cluster = 0;
+    uint32_t dir_entry_offset = 0;
 
     int ret = fat32_find_entry(sbi, info->first_cluster, info->file_size,
                                lookup_name, NULL, &found_cluster,
-                               &found_size, &found_attr, &resolved_name);
+                               &found_size, &found_attr, &resolved_name,
+                               &dir_entry_cluster, &dir_entry_offset);
     if (ret < 0) return ret;
 
     int is_dir = (found_attr & ATTR_DIRECTORY) ? 1 : 0;
@@ -1374,6 +1398,15 @@ static int fat32_dir_lookup(struct inode *dir, struct dentry *dentry) {
     if (resolved_name) kfree(resolved_name);
 
     if (!child_inode) return -ENOMEM;
+
+    /* Bug #20: Track parent directory entry position for file size updates */
+    {
+        struct fat32_inode_info *child_info = (struct fat32_inode_info *)child_inode->priv;
+        if (child_info) {
+            child_info->parent_cluster = dir_entry_cluster;
+            child_info->dir_entry_offset = dir_entry_offset;
+        }
+    }
 
     /* For directories, compute the actual directory size */
     if (is_dir) {
@@ -1401,7 +1434,8 @@ static int fat32_dir_create(struct inode *dir, const char *name, int flags) {
     /* Check if file already exists */
     uint32_t dummy_cluster = 0;
     int ret = fat32_find_entry(sbi, info->first_cluster, info->file_size,
-                               name, NULL, &dummy_cluster, NULL, NULL, NULL);
+                               name, NULL, &dummy_cluster, NULL, NULL, NULL,
+                               NULL, NULL);
     if (ret == 0) return -EEXIST;
 
     /* Allocate a new cluster for the file */
@@ -1465,11 +1499,17 @@ static int fat32_dir_unlink(struct inode *dir, const char *name) {
 
     int ret = fat32_find_entry(sbi, info->first_cluster, info->file_size, name,
                                &found_entry, &found_cluster,
-                               NULL, &found_attr, NULL);
+                               NULL, &found_attr, NULL,
+                               NULL, NULL);
     if (ret < 0) return ret;
 
     /* Cannot unlink a directory */
     if (found_attr & ATTR_DIRECTORY) return -EISDIR;
+
+    /* NOTE: Known TOCTOU limitation — the LFN entries preceding the
+     * target entry are not cleared. This is safe for single-threaded
+     * operations but may leave stale LFN entries in multi-threaded
+     * scenarios. */
 
     /* Walk the parent directory to find and mark the entry deleted */
     uint32_t cluster_size = sbi->cluster_size;

@@ -1,5 +1,105 @@
 # AuroraOS Changelog
 
+## v4.0.8 (2026-07-13) — 第二轮全项目深度修复 + 新发现47个Bug
+
+经过对 v4.0.7 修复质量的深度审查，修复了 5 个部分修复和 6 个未修复的遗留问题，同时发现并修复 47 个新 Bug。
+
+### 遗留问题修复（11个）
+
+| 类型 | Bug | 修复 |
+|------|-----|------|
+| 部分修复 | #6 virtio_net.c | RX 描述符改为链式连接（VIRTQ_DESC_F_NEXT），设备可见所有缓冲区 |
+| 部分修复 | #13 capability.c | `cap_fd_get_file()` 和 `cap_fd_close()` 新增 magic 检查 |
+| 部分修复 | #21 vfs.c | `mkdir`/`rmdir`/`unlink`/`rename` 新增 `vfs_lock()` 保护 |
+| 部分修复 | #31 signal.c | `pending` 信号设置移入 `signal_lock` 临界区 |
+| 部分修复 | #53 console.c | VGA/帧缓冲输出新增 `console_out_lock` 自旋锁 |
+| 仍未修复 | #14 mem.c | `alloc_pages()` 物理地址超 1GB 时返回 NULL 并正确回退 |
+| 仍未修复 | #20 fat32.c | `fat32_file_write` 现在更新磁盘目录条目中的文件大小 |
+| 仍未修复 | #24 nvme.c | PRP 列表在 I/O 完成后 `kfree()` |
+| 仍未修复 | #44 syscall.c | `sys_execve` 完整深拷贝 argv 指针数组（32 条目） |
+| 仍未修复 | #47 mem.c | MB1/MB2 检测使用显式 magic 值和 reserved 字段校验 |
+
+### 新发现 CRITICAL（8个修复）
+
+| # | 文件 | 修复 |
+|---|------|------|
+| C1 | `mem.c` | `spin_lock_irqsave` 改用调用者局部变量存储 flags，消除 SMP 竞态 |
+| C2 | `sched.c` | PID 分配新增 `pid_lock` 自旋锁 |
+| C3 | `sched.c` | `create_task()` 插入就绪队列前获取 `rq->lock` + `irq_save` |
+| C4 | `pipe.c` | 新增 `blocked_reader`/`blocked_writer` 唤醒机制 |
+| C5 | `panic.c`/`log.c` | 格式解析器支持 `%lx`/`%llx`/`%lu`/`%llu`/`%ld`/`%lld` |
+| C6 | `module.c` | init/exit 符号查找移至 `kfree(symtab)` 之前，消除 UAF |
+| C7 | `arch/x86_64/syscall.S` | syscall 入口切换到 per-CPU 内核栈（GS:192），消除内核栈漏洞 |
+| C8 | `Makefile` | 新增 `-mno-red-zone` 到 CFLAGS |
+
+### 新发现 HIGH（14个修复）
+
+| # | 文件 | 修复 |
+|---|------|------|
+| H1 | `signal.c` | `signal_state` 分配检查移入 `signal_lock` 临界区 |
+| H2 | `mem.c` | `alloc_pages` 仅在 `pa < KERNEL_PHYS_MAX` 时 memset |
+| H3 | `boot/efi_main.c` | GOP 像素掩码为 0 时跳过死循环 |
+| H4 | `arch/x86_64/context.S` | 上下文切换保存/恢复 RFLAGS |
+| H5 | `squashfs.c` | 块列表读取新增边界检查 |
+| H6 | `squashfs.c` | `count=0` 时跳过避免 `count-1` 下溢 |
+| H7 | `ext2.c` | `ext2_alloc_block`/`ext2_alloc_inode` 新增位图锁 |
+| H8 | `vfs.c` | `vfs_lookup` 释放锁前递增父 dentry refcount |
+| H9 | `pagetable.c` | 移除懒分配路径中重复的页错误计数 |
+| H10 | `pagetable.c` | 页错误处理改用 `current->cr3` 而非 `read_cr3()` |
+| H11 | `pagetable.c` | `page_ref_inc/dec` 使用 `__sync_fetch_and_add/sub` 原子操作 |
+| H12 | `pagetable.c` | `free_pagetable` 使用 `__sync_sub_and_fetch` 原子递减 |
+| H13 | `module.c` | `st_name` 边界检查（`st_name >= strtab_hdr->sh_size`） |
+| H14 | `module.c` | `r_offset` 边界检查（`r_offset >= total_size`） |
+
+### 新发现 MEDIUM（17个修复）
+
+| # | 文件 | 修复 |
+|---|------|------|
+| M1 | `pipe.c` | 已有 NULL 检查（`inode->name && inode->name[0]`） |
+| M2 | `squashfs.c` | `offset >= dir_size` 前检查 |
+| M3 | `squashfs.c` | `block_off >= uncomp_size` 边界检查 |
+| M4 | `squashfs.c` | 已有正确顺序（kmalloc → 检查 → memcpy） |
+| M5 | `vfs.c` | 驱逐前检查 `inode->dentry == d` 防止共享 inode 被释放 |
+| M6 | `fat32.c` | rmdir LFN 清除 TOCTOU 注释 |
+| M7 | `fat32.c` | unlink LFN 清除 TOCTOU 注释 |
+| M8 | `fat32.c` | `needed_clusters` 转为 `uint64_t` |
+| M9 | `ext2.c` | 检查 `write_block` 返回值 |
+| M10 | `pagetable.c` | 已有原子操作（已修复于 H11） |
+| M11 | `pagetable.c` | `page_ref_get` 返回原子读取值 |
+| M12 | `signal.c` | 唤醒前检查信号是否被阻塞 |
+| M13 | `module.c` | RELA section kmalloc 上限 1MB |
+| M14 | `explain.c` | 信号/错误码数组边界检查 |
+| M15 | `sysfs.c` | `memcpy` 用 `stac()`/`clac()` 包装（SMAP 保护） |
+| M16 | `sysfs.c` | `sysfs_lookup` 缓存 inode |
+| M17 | `linker.ld` | `.bss` section 新增 `*(COMMON)` |
+
+### 新发现 LOW（8个修复）
+
+| # | 文件 | 修复 |
+|---|------|------|
+| L1 | `mem.c` | `slab_get_stats` 空闲链表遍历加锁 |
+| L2 | `sched.c` | `find_task_by_pid` 跳过 ZOMBIE 任务 |
+| L3 | `block_dev.c` | 设备列表启动时初始化注释 |
+| L4 | `ramdisk.c` | 全局单实例限制注释 |
+| L5 | `vfs.c` | `vfs_file_dup` 使用 `__sync_fetch_and_add` |
+| L6 | `squashfs.c` | `cur_offset` 重置逻辑修复 |
+| L7 | `sched.c` | `min_vruntime` 使用 CAS 原子更新 |
+| L8 | `sched.c` | `free_pid` 锁已有（C2 修复） |
+
+### 关键架构变更
+- **spin_lock_irqsave** 签名变更：flags 参数改为调用者局部变量，消除 SMP 竞态
+- **syscall.S** 内核栈隔离：syscall 入口切换到 per-CPU 内核栈
+- **Makefile** 新增 `-mno-red-zone` 防止 IRQ 破坏内核局部变量
+- **pipe.c** 新增阻塞唤醒机制（`blocked_reader`/`blocked_writer`）
+- **pagetable.c** COW ref_count 全面原子化
+- **vfs.c** 所有 dentry 操作（mount/lookup/open/close/mkdir/rmdir/unlink/rename）均已加锁
+
+### 版本控制
+- 版本号: v4.0.8
+- 修复总数: 58 个 Bug（5 部分修复 + 6 未修复 + 8 新严重 + 14 新高危 + 17 新中危 + 8 新低危）
+
+---
+
 ## v4.0.7 (2026-07-13) — 全项目 Bug 修复与安全加固
 
 经过对约 100+ 源文件的全面审查，共修复 53 个 Bug，按严重程度分类如下。

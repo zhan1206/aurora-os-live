@@ -23,7 +23,11 @@ struct ramdisk_priv {
 static uint8_t ramdisk_buffer[RAMDISK_SIZE_BYTES] __attribute__((aligned(4096)));
 
 /* We store the ramdisk priv pointer globally so read/write can find it.
- * The read/write ops don't receive a bdev pointer. */
+ * The read/write ops don't receive a bdev pointer.
+ *
+ * KNOWN LIMITATION: g_ramdisk_priv is a global singleton. Only one ramdisk
+ * can be active at a time. Creating multiple ramdisks would require
+ * refactoring the read/write ops to carry a per-device context pointer. */
 static struct ramdisk_priv *g_ramdisk_priv = NULL;
 static uint32_t g_ramdisk_block_size = 512;
 

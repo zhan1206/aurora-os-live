@@ -69,6 +69,7 @@ void explain_exit(int pid, int code, int signal) {
 }
 
 void explain_signal(int pid, int sig, const char *action) {
+    if (sig < 0 || sig >= NSIG || !action) return;
     char buf[112];
     char *p = buf;
     const char *s1;
@@ -83,6 +84,7 @@ void explain_signal(int pid, int sig, const char *action) {
 }
 
 void explain_oom_kill(int victim_pid, const char *reason) {
+    if (!reason) return;
     char buf[112];
     char *p = buf;
     const char *s1 = "OOM killed pid=";

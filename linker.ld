@@ -33,6 +33,7 @@ SECTIONS
     . = ALIGN(16);
     .bss : {
         *(.bss .bss.*)
+        *(COMMON)
     }
 
     /DISCARD/ : {

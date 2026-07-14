@@ -104,7 +104,6 @@ struct mb2_mmap_entry {
  * ================================================================ */
 typedef struct spinlock {
     volatile uint32_t locked;
-    uint32_t saved_flags;   /* saved EFLAGS for irqrestore */
 } spinlock_t;
 
 static inline void spin_lock(spinlock_t *lock) {
@@ -127,19 +126,22 @@ static inline void spin_unlock(spinlock_t *lock) {
 }
 
 /*
- * spin_lock_irqsave: Save EFLAGS, disable interrupts, then acquire lock.
- * The saved flags are stored in lock->saved_flags for restoration by
- * spin_unlock_irqrestore.
+ * spin_lock_irqsave: Save EFLAGS into *flags, disable interrupts,
+ * then acquire lock.  The saved flags are stored in a caller-provided
+ * local variable, avoiding the SMP race where multiple CPUs would
+ * overwrite a shared saved_flags field in the spinlock_t struct.
  */
-static inline void spin_lock_irqsave(spinlock_t *lock) {
+static inline void spin_lock_irqsave(spinlock_t *lock, uint32_t *flags) {
+    uint32_t f;
     asm volatile (
         "pushfl\n\t"
         "popl %0\n\t"
         "cli"
-        : "=m"(lock->saved_flags)
+        : "=r"(f)
         :
         : "memory"
     );
+    *flags = f;
     spin_lock(lock);
 }
 
@@ -148,28 +150,31 @@ static inline void spin_lock_irqsave(spinlock_t *lock) {
  * that was saved by spin_lock_irqsave.  This correctly handles the case
  * where interrupts were already disabled before the lock was acquired.
  */
-static inline void spin_unlock_irqrestore(spinlock_t *lock) {
+static inline void spin_unlock_irqrestore(spinlock_t *lock, uint32_t flags) {
     spin_unlock(lock);
     asm volatile (
         "pushl %0\n\t"
         "popfl"
         :
-        : "m"(lock->saved_flags)
+        : "r"(flags)
         : "memory"
     );
 }
 
-static spinlock_t buddy_lock_ = {0, 0};
-static spinlock_t slab_lock_  = {0, 0};
+static spinlock_t buddy_lock_ = {0};
+static spinlock_t slab_lock_  = {0};
 
 /*
  * Use irqsave/irqrestore to prevent deadlock when IRQ handlers
  * call kmalloc/kfree while the buddy or slab lock is held.
+ * Each macro pair declares a local variable to hold the saved
+ * interrupt flags, avoiding the SMP race where multiple CPUs
+ * would share a single saved_flags field.
  */
-#define buddy_lock()   spin_lock_irqsave(&buddy_lock_)
-#define buddy_unlock() spin_unlock_irqrestore(&buddy_lock_)
-#define slab_lock()    spin_lock_irqsave(&slab_lock_)
-#define slab_unlock()  spin_unlock_irqrestore(&slab_lock_)
+#define buddy_lock()   do { uint32_t __buddy_saved_flags; spin_lock_irqsave(&buddy_lock_, &__buddy_saved_flags)
+#define buddy_unlock() spin_unlock_irqrestore(&buddy_lock_, __buddy_saved_flags); } while(0)
+#define slab_lock()    do { uint32_t __slab_saved_flags; spin_lock_irqsave(&slab_lock_, &__slab_saved_flags)
+#define slab_unlock()  spin_unlock_irqrestore(&slab_lock_, __slab_saved_flags); } while(0)
 
 /* ================================================================
  * Buddy system internal data
@@ -387,27 +392,60 @@ void phys_mem_init(void *mb_info) {
 
     if (mb_info) {
         /*
-         * Detect Multiboot version by checking magic.
-         * The magic is passed separately to kernel_main and must
-         * be stored before calling phys_mem_init.  Since we receive
-         * only the info pointer, we use a heuristic:
-         *   - Multiboot1 info: starts with uint32_t flags at offset 0
-         *   - Multiboot2 info: starts with uint32_t total_size, then uint32_t reserved
+         * Detect Multiboot version by checking the info structure layout.
          *
-         * We check if offset 0 looks like a valid MB1 flags value
-         * (low bits set, high bits zero).
+         * Magic values (MB1: 0x2BADB002, MB2: 0x36D76289) are passed in
+         * EAX by the bootloader, not stored in the info structure.  We use
+         * the info structure layout to distinguish versions:
+         *   - Multiboot1 info: offset 0 = uint32_t flags, offset 4 = mem_lower
+         *   - Multiboot2 info: offset 0 = uint32_t total_size, offset 4 = reserved (0)
+         *
+         * The reserved field at offset 4 being 0 is a strong indicator of
+         * Multiboot2, since MB1's mem_lower is typically non-zero.
          */
-        uint32_t first_word = *(uint32_t *)mb_info;
+        uint32_t first_word  = *(uint32_t *)mb_info;
+        uint32_t second_word = *((uint32_t *)mb_info + 1);
 
-        /*
-         * Heuristic: MB1 flags usually have bits 0-6 set and no high bits.
-         * NOTE: This is a known limitation — the heuristic may misjudge if
-         * the bootloader's info data coincidentally looks like MB1 flags.
-         * Priority should be given to the bootloader's explicit magic value
-         * indication when available.
-         */
-        if ((first_word & 0xFFFF0000) == 0 && (first_word & 0x7F) != 0) {
-            /* === Multiboot1 parsing === */
+        if (second_word == 0 && first_word > 0 && first_word < 0x100000) {
+            /* === Multiboot2 parsing (reserved=0 at offset 4) === */
+            struct mb2_tag *tag = (struct mb2_tag *)((uint8_t*)mb_info + 8);
+            uint32_t total_size = first_word;
+
+            while (tag->type != MULTIBOOT2_TAG_END &&
+                   (uintptr_t)tag < (uintptr_t)mb_info + total_size) {
+
+                if (tag->type == MULTIBOOT2_TAG_BASIC) {
+                    uint32_t *basic = (uint32_t*)((uint8_t*)tag + 8);
+                    uint32_t mem_upper = basic[1];
+                    total_ram = (uint64_t)(mem_upper + 1024) * 1024;
+                    if (total_ram > 256ULL * 1024 * 1024) total_ram = 256ULL * 1024 * 1024;
+                }
+
+                if (tag->type == MULTIBOOT2_TAG_MMAP) {
+                    uint32_t entry_size  = *(uint32_t*)((uint8_t*)tag + 8);
+                    uint8_t *entries = (uint8_t*)tag + 16;
+                    uint32_t tag_end = (uint32_t)((uintptr_t)tag + tag->size);
+
+                    while ((uintptr_t)entries + entry_size <= (uintptr_t)tag_end) {
+                        struct mb2_mmap_entry *e = (struct mb2_mmap_entry*)entries;
+                        if (e->type == MB2_MMAP_AVAILABLE) {
+                            uint64_t end_addr = e->base_addr + e->length;
+                            if (end_addr > total_ram && e->base_addr < 256ULL * 1024 * 1024)
+                                total_ram = (end_addr > 256ULL * 1024 * 1024)
+                                            ? 256ULL * 1024 * 1024 : end_addr;
+                        }
+                        entries += entry_size;
+                    }
+                }
+
+                uint32_t tag_size = tag->size;
+                if (tag_size < 8) tag_size = 8;
+                tag_size = (tag_size + 7) & ~7U;
+                tag = (struct mb2_tag *)((uint8_t*)tag + tag_size);
+            }
+
+        } else {
+            /* === Multiboot1 parsing (flags at offset 0, mem_lower at offset 4) === */
             uint32_t flags = first_word;
             uint8_t *info = (uint8_t *)mb_info;
 
@@ -451,44 +489,6 @@ void phys_mem_init(void *mb_info) {
                 }
 
                 if (e820_total > 0) total_ram = e820_total;
-            }
-
-        } else {
-            /* === Multiboot2 parsing === */
-            struct mb2_tag *tag = (struct mb2_tag *)((uint8_t*)mb_info + 8);
-            uint32_t total_size = *(uint32_t*)mb_info;
-
-            while (tag->type != MULTIBOOT2_TAG_END &&
-                   (uintptr_t)tag < (uintptr_t)mb_info + total_size) {
-
-                if (tag->type == MULTIBOOT2_TAG_BASIC) {
-                    uint32_t *basic = (uint32_t*)((uint8_t*)tag + 8);
-                    uint32_t mem_upper = basic[1];
-                    total_ram = (uint64_t)(mem_upper + 1024) * 1024;
-                    if (total_ram > 256ULL * 1024 * 1024) total_ram = 256ULL * 1024 * 1024;
-                }
-
-                if (tag->type == MULTIBOOT2_TAG_MMAP) {
-                    uint32_t entry_size  = *(uint32_t*)((uint8_t*)tag + 8);
-                    uint8_t *entries = (uint8_t*)tag + 16;
-                    uint32_t tag_end = (uint32_t)((uintptr_t)tag + tag->size);
-
-                    while ((uintptr_t)entries + entry_size <= (uintptr_t)tag_end) {
-                        struct mb2_mmap_entry *e = (struct mb2_mmap_entry*)entries;
-                        if (e->type == MB2_MMAP_AVAILABLE) {
-                            uint64_t end_addr = e->base_addr + e->length;
-                            if (end_addr > total_ram && e->base_addr < 256ULL * 1024 * 1024)
-                                total_ram = (end_addr > 256ULL * 1024 * 1024)
-                                            ? 256ULL * 1024 * 1024 : end_addr;
-                        }
-                        entries += entry_size;
-                    }
-                }
-
-                uint32_t tag_size = tag->size;
-                if (tag_size < 8) tag_size = 8;
-                tag_size = (tag_size + 7) & ~7U;
-                tag = (struct mb2_tag *)((uint8_t*)tag + tag_size);
             }
         }
     }
@@ -678,21 +678,30 @@ void *alloc_pages(uint32_t order) {
 
     stat_used_pages += (1ULL << order);
 
-    buddy_unlock();
-
-    /* Zero the page(s) for security.
-     * Bug #14: This relies on identity mapping. Physical addresses are
-     * directly cast to virtual addresses, which works only for the
-     * identity-mapped range (0..KERNEL_PHYS_MAX, 1GB). */
+    /* Bug #14: Physical addresses beyond KERNEL_PHYS_MAX (1GB) are not
+     * identity-mapped, so casting pa to a virtual address would access
+     * unmapped memory. Return NULL to signal failure to the caller.
+     * Check must be done before releasing the buddy lock. */
     uint64_t pa = p->phys_addr;
     if (pa >= KERNEL_PHYS_MAX) {
         log_printf(LOG_LEVEL_WARN,
-                   "alloc_pages: physical address %p beyond identity-mapped range (max %p)\n",
+                   "alloc_pages: physical address %p beyond identity-mapped range (max %p), returning NULL\n",
                    (void*)(uintptr_t)pa, (void*)(uintptr_t)KERNEL_PHYS_MAX);
-        /* Proceed anyway: this is a design limitation, not a hard error.
-         * The kernel uses identity mapping as the standard approach for
-         * kernel physical memory access. */
+        /* Return the page to the free list */
+        p->flags |= PAGE_FLAG_FREE;
+        p->order = order;
+        p->ref_count = 0;
+        list_add(&free_area[order], p);
+        if (stat_used_pages >= (1ULL << order))
+            stat_used_pages -= (1ULL << order);
+        else
+            stat_used_pages = 0;
+        buddy_unlock();
+        return NULL;
     }
+
+    buddy_unlock();
+
     void *va = (void*)(uintptr_t)pa;
     memset(va, 0, (size_t)(PAGE_SIZE << order));
 
@@ -963,6 +972,7 @@ void slab_get_stats(size_t *total_alloc, size_t *total_free) {
     *total_alloc = 0;
     *total_free  = 0;
     /* Simplified: count objects in free lists across all caches */
+    slab_lock();
     for (int i = 0; i < SLAB_NUM_CACHES; ++i) {
         void *obj = slab_caches[i].free_list;
         while (obj) {
@@ -970,4 +980,5 @@ void slab_get_stats(size_t *total_alloc, size_t *total_free) {
             obj = *(void**)obj;
         }
     }
+    slab_unlock();
 }

@@ -324,9 +324,13 @@ static int virtio_net_device_init(struct virtio_net_dev *dev) {
         dev->netdev.mtu = 1500;
     }
 
-    /* Allocate receive buffers */
+    /* Allocate receive buffers and chain them into a single descriptor chain.
+     * Bug #6: The device can only see the head descriptor of a chain.
+     * We chain all RX descriptors together using vq->desc[idx].next links
+     * so the device can use all buffers for receiving packets. */
     dev->rx_buffer_count = 0;
-    int first_rx_idx = -1;  /* Bug #6: save first descriptor head for kick */
+    int first_rx_idx = -1;
+    int prev_idx = -1;
     for (uint32_t i = 0; i < dev->rx_vq.num && i < VIRTIO_VQ_MAX_SIZE; i++) {
         void *buf = kmalloc(VIRTIO_NET_MAX_PACKET);
         if (!buf) break;
@@ -342,10 +346,16 @@ static int virtio_net_device_init(struct virtio_net_dev *dev) {
             break;
         }
         if (first_rx_idx < 0) first_rx_idx = idx;
+        if (prev_idx >= 0) {
+            /* Chain previous descriptor to this one */
+            dev->rx_vq.desc[prev_idx].flags |= VIRTQ_DESC_F_NEXT;
+            dev->rx_vq.desc[prev_idx].next = (uint16_t)idx;
+        }
+        prev_idx = idx;
         dev->rx_buffer_count++;
     }
 
-    /* Submit all receive buffers */
+    /* Submit the descriptor chain */
     if (dev->rx_buffer_count > 0) {
         virtq_kick(&dev->rx_vq, (uint16_t)first_rx_idx);
         virtio_pci_notify_queue(dev, VIRTIO_NET_RX_QUEUE);

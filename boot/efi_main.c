@@ -463,13 +463,13 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable
             EFI_PIXEL_BITMASK *bm = &GOP->Mode->Info->PixelInformation;
             uint32_t mask;
             mask = bm->RedMask;
-            fb_red_mp = 0; while (!(mask & 1)) { fb_red_mp++; mask >>= 1; }
+            fb_red_mp = 0; while (mask && !(mask & 1)) { fb_red_mp++; mask >>= 1; }
             fb_red_ms = 0; while (mask & 1) { fb_red_ms++; mask >>= 1; }
             mask = bm->GreenMask;
-            fb_green_mp = 0; while (!(mask & 1)) { fb_green_mp++; mask >>= 1; }
+            fb_green_mp = 0; while (mask && !(mask & 1)) { fb_green_mp++; mask >>= 1; }
             fb_green_ms = 0; while (mask & 1) { fb_green_ms++; mask >>= 1; }
             mask = bm->BlueMask;
-            fb_blue_mp = 0; while (!(mask & 1)) { fb_blue_mp++; mask >>= 1; }
+            fb_blue_mp = 0; while (mask && !(mask & 1)) { fb_blue_mp++; mask >>= 1; }
             fb_blue_ms = 0; while (mask & 1) { fb_blue_ms++; mask >>= 1; }
         }
 

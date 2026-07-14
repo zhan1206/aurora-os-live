@@ -299,13 +299,18 @@ void vfs_dentry_evict(void) {
          * The inode is the super_block's root inode — freeing it would
          * leave a dangling pointer in sb->root, causing UAF later. */
         if (d->inode && !(d->flags & DENTRY_FLAG_MOUNT)) {
-            if (d->inode->name) {
-                kfree((void *)d->inode->name);
+            /* Only free the inode if its dentry back-pointer still points
+             * to this dentry. If two dentries share the same inode,
+             * evicting one must not free the inode out from under the other. */
+            if (d->inode->dentry == d) {
+                if (d->inode->name) {
+                    kfree((void *)d->inode->name);
+                }
+                if (d->inode->priv) {
+                    kfree(d->inode->priv);
+                }
+                kfree(d->inode);
             }
-            if (d->inode->priv) {
-                kfree(d->inode->priv);
-            }
-            kfree(d->inode);
         }
 
         /* Free the name */
@@ -417,6 +422,9 @@ struct inode *vfs_lookup(const char *path) {
                 if (!child) { vfs_unlock(); return NULL; }
                 dentry_add_child(cur, child);
             }
+            /* Increment parent dentry refcount to prevent eviction
+             * while the lock is released for the filesystem callback. */
+            cur->refcount++;
             vfs_unlock();
 
             /* Ask parent inode to resolve this component (outside lock) */
@@ -425,6 +433,8 @@ struct inode *vfs_lookup(const char *path) {
             }
 
             vfs_lock();
+            /* Decrement parent refcount now that we hold the lock again */
+            if (cur->refcount > 0) cur->refcount--;
             if (!child->inode) {
                 /* Negative dentry: component not found */
                 vfs_unlock();
@@ -544,7 +554,7 @@ int vfs_close(struct file *filp) {
 int vfs_file_dup(struct file *filp) {
     if (!filp) return -1;
     if (filp->refcount <= 0) return -1;
-    filp->refcount++;
+    __sync_fetch_and_add(&filp->refcount, 1);
     return 0;
 }
 
@@ -579,7 +589,10 @@ int vfs_mkdir(const char *path) {
     if (!parent->is_dir) return -1;
     if (!parent->ops || !parent->ops->mkdir) return -1;
 
-    return parent->ops->mkdir(parent, name);
+    vfs_lock();
+    int ret = parent->ops->mkdir(parent, name);
+    vfs_unlock();
+    return ret;
 }
 
 /* ================================================================
@@ -612,7 +625,10 @@ int vfs_rmdir(const char *path) {
     if (!parent->is_dir) return -1;
     if (!parent->ops || !parent->ops->rmdir) return -1;
 
-    return parent->ops->rmdir(parent, name);
+    vfs_lock();
+    int ret = parent->ops->rmdir(parent, name);
+    vfs_unlock();
+    return ret;
 }
 
 /* ================================================================
@@ -644,7 +660,10 @@ int vfs_unlink(const char *path) {
     if (!parent->is_dir) return -1;
     if (!parent->ops || !parent->ops->unlink) return -1;
 
-    return parent->ops->unlink(parent, name);
+    vfs_lock();
+    int ret = parent->ops->unlink(parent, name);
+    vfs_unlock();
+    return ret;
 }
 
 /* ================================================================
@@ -692,7 +711,10 @@ int vfs_rename(const char *oldpath, const char *newpath) {
     if (!olddir->is_dir || !newdir->is_dir) return -1;
     if (!olddir->ops || !olddir->ops->rename) return -1;
 
-    return olddir->ops->rename(olddir, oldname, newdir, newname);
+    vfs_lock();
+    int ret = olddir->ops->rename(olddir, oldname, newdir, newname);
+    vfs_unlock();
+    return ret;
 }
 
 /* ================================================================

@@ -8,6 +8,9 @@
  * new_rsp: new RSP value to load
  */
 context_switch:
+    /* Save RFLAGS to preserve interrupt flag state */
+    pushfq
+
     /* Save registers callee-saved (rbx, rbp, r12-r15) */
     push %rbp
     push %rbx
@@ -29,6 +32,10 @@ context_switch:
     pop %r12
     pop %rbx
     pop %rbp
+
+    /* Restore RFLAGS from new context's saved value */
+    popfq
+
     /* Return to new context (ret will pop RIP from new stack) */
     ret
 

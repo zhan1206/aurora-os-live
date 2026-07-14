@@ -40,6 +40,8 @@ struct cpu_data {
     int online;                          /* 1 = CPU is online, 0 = not yet */
     uint64_t gdt[PERCPU_GDT_ENTRIES];   /* per-CPU GDT (TSS descriptor differs) */
     uint8_t tss[104];                    /* per-CPU TSS (IST stack pointers) */
+    uint64_t kernel_stack;               /* kernel stack pointer for syscall entry */
+    uint64_t user_rsp_save;              /* saved user RSP during syscall */
 };
 
 /* ================================================================

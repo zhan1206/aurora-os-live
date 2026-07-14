@@ -497,6 +497,12 @@ int module_load(const char *path) {
 
         /* Read RELA entries */
         uint64_t rela_count = shdrs[i].sh_size / sizeof(Elf64_Rela);
+        /* Cap RELA section size to 1MB to prevent excessive allocation */
+        if (shdrs[i].sh_size > (1ULL << 20)) {
+            log_printf(LOG_LEVEL_WARN, "module_load: RELA section %d too large (%llu bytes), skipping\n",
+                       i, (unsigned long long)shdrs[i].sh_size);
+            continue;
+        }
         Elf64_Rela *relas = (Elf64_Rela *)kmalloc(shdrs[i].sh_size);
         if (!relas) continue;
         f->offset = shdrs[i].sh_offset;
@@ -513,11 +519,24 @@ int module_load(const char *path) {
             uint32_t r_type   = ELF64_R_TYPE(r_info);
             uint32_t r_sym    = ELF64_R_SYM(r_info);
 
+            /* Validate r_offset is within the module's allocated memory */
+            if (r_offset >= total_size) {
+                log_printf(LOG_LEVEL_WARN, "module_load: r_offset %llu out of bounds (module size %zu)\n",
+                           (unsigned long long)r_offset, total_size);
+                relocate_errors++;
+                continue;
+            }
+
             uint64_t *patch_addr = (uint64_t *)(uintptr_t)(target_base + r_offset);
             uint64_t S = 0;  /* symbol value */
             const char *sym_name = NULL;
 
             if (r_sym > 0 && r_sym < symtab_count && symtab_data && strtab_data) {
+                if (symtab_data[r_sym].st_name >= strtab_hdr->sh_size) {
+                    log_printf(LOG_LEVEL_WARN, "module_load: symbol st_name out of bounds\n");
+                    relocate_errors++;
+                    continue;
+                }
                 sym_name = strtab_data + symtab_data[r_sym].st_name;
 
                 if (ELF64_ST_BIND(symtab_data[r_sym].st_info) == STB_GLOBAL ||
@@ -576,6 +595,40 @@ int module_load(const char *path) {
         kfree(relas);
     }
 
+    /* --- Look up module's init/exit symbols BEFORE freeing symtab/strtab ---
+     * BUGFIX: The original code freed symtab_data and strtab_data first,
+     * then tried to look up init/exit symbols from the freed memory (UAF).
+     * The lookup must happen while the data is still valid. */
+    void (*module_init_fn)(void) = NULL;
+    void (*module_exit_fn)(void) = NULL;
+    if (symtab_data && strtab_data && symtab_count > 0) {
+        for (uint32_t s = 0; s < symtab_count; s++) {
+            if (ELF64_ST_BIND(symtab_data[s].st_info) != STB_GLOBAL) continue;
+            const char *sn = strtab_data + symtab_data[s].st_name;
+
+            /* Find the section this symbol is in */
+            uint16_t sndx = symtab_data[s].st_shndx;
+            if (sndx < shnum) {
+                /* Find the corresponding section in our allocated layout */
+                uint64_t sec_addr = 0;
+                for (int j = 0; j < nsecs; j++) {
+                    if (secs[j].file_offset == shdrs[sndx].sh_offset &&
+                        secs[j].size == shdrs[sndx].sh_size) {
+                        sec_addr = secs[j].addr;
+                        break;
+                    }
+                }
+                uint64_t sym_addr = sec_addr + symtab_data[s].st_value;
+
+                if (strcmp(sn, "init") == 0) {
+                    module_init_fn = (void (*)(void))(uintptr_t)sym_addr;
+                } else if (strcmp(sn, "exit") == 0) {
+                    module_exit_fn = (void (*)(void))(uintptr_t)sym_addr;
+                }
+            }
+        }
+    }
+
     if (strtab_data) kfree(strtab_data);
     if (symtab_data) kfree(symtab_data);
     kfree(shstrtab);
@@ -613,38 +666,9 @@ int module_load(const char *path) {
     mod->syms  = NULL;
     mod->num_syms = 0;
 
-    /* Look up module's own init/exit symbols from the already-loaded symtab.
-     * No need to re-open the file — we already have symtab_data and strtab_data
-     * from the first pass, and secs[] contains the section layout. */
-    if (symtab_data && strtab_data && symtab_count > 0) {
-        for (uint32_t s = 0; s < symtab_count; s++) {
-            if (ELF64_ST_BIND(symtab_data[s].st_info) != STB_GLOBAL) continue;
-            const char *sn = strtab_data + symtab_data[s].st_name;
-
-            /* Find the section this symbol is in */
-            uint16_t sndx = symtab_data[s].st_shndx;
-            if (sndx < shnum) {
-                /* Find the corresponding section in our allocated layout */
-                uint64_t sec_addr = 0;
-                for (int j = 0; j < nsecs; j++) {
-                    if (secs[j].file_offset == shdrs[sndx].sh_offset &&
-                        secs[j].size == shdrs[sndx].sh_size) {
-                        sec_addr = secs[j].addr;
-                        break;
-                    }
-                }
-                uint64_t sym_addr = sec_addr + symtab_data[s].st_value;
-
-                if (strcmp(sn, "init") == 0) {
-                    mod->init = (void (*)(void))(uintptr_t)sym_addr;
-                } else if (strcmp(sn, "exit") == 0) {
-                    mod->exit = (void (*)(void))(uintptr_t)sym_addr;
-                }
-            }
-        }
-    }
-
     /* Insert into module list */
+    mod->init = module_init_fn;
+    mod->exit = module_exit_fn;
     mod->next = module_head;
     module_head = mod;
 

@@ -10,7 +10,22 @@ syscall_entry:
 /* swapgs to use kernel GS base if needed */
 swapgs
 
-/* save registers into a trapframe on stack (order must be consistent with struct) */
+/*
+ * BUGFIX: Switch to per-CPU kernel stack before pushing the trapframe.
+ * The user-controlled RSP must not be used as the kernel stack, as it
+ * allows user-space to write arbitrary data into kernel memory.
+ *
+ * After swapgs, GS points to the per-CPU cpu_data struct.
+ *   GS:192 = kernel_stack (uint64_t)
+ *   GS:200 = user_rsp_save (uint64_t)
+ *
+ * We save the user RSP, then load the kernel RSP before pushing.
+ * Before returning to user mode, we restore the user RSP.
+ */
+mov %rsp, %gs:200    /* save user RSP */
+mov %gs:192, %rsp    /* load kernel stack pointer */
+
+/* save registers into a trapframe on kernel stack (order must be consistent with struct) */
 push %r15
 push %r14
 push %r13
@@ -47,6 +62,9 @@ pop %r12
 pop %r13
 pop %r14
 pop %r15
+
+/* Restore user RSP before returning to user mode */
+mov %gs:200, %rsp
 
 /* swap back */
 swapgs

@@ -196,17 +196,24 @@ static struct page *page_of_phys(uint64_t pa) {
 
 static void page_ref_inc(uint64_t pa) {
     struct page *pg = page_of_phys(pa);
-    if (pg) pg->ref_count++;
+    if (pg) __sync_fetch_and_add(&pg->ref_count, 1);
 }
 
 static void page_ref_dec(uint64_t pa) {
     struct page *pg = page_of_phys(pa);
-    if (pg && pg->ref_count > 0) pg->ref_count--;
+    if (pg) {
+        uint32_t old = __sync_fetch_and_sub(&pg->ref_count, 1);
+        if (old == 0) {
+            /* Underflow: restore to 0 */
+            pg->ref_count = 0;
+        }
+    }
 }
 
 static uint32_t page_ref_get(uint64_t pa) {
     struct page *pg = page_of_phys(pa);
-    return pg ? pg->ref_count : 0;
+    if (!pg) return 0;
+    return (uint32_t)__sync_fetch_and_add(&pg->ref_count, 0);
 }
 
 /*
@@ -661,7 +668,7 @@ void pf_handler_c(uint64_t error_code) {
         uint64_t page_addr = cr2 & ~0xFFFULL;
         uint64_t flags = PTE_PRESENT | PTE_RW | PTE_USER;
         /* NX is set for data pages by default via EFER.NXE + absence of PTE_NX flag */
-        int ret = map_user_page(read_cr3(), page_addr, (uint64_t)(uintptr_t)new_page, flags);
+        int ret = map_user_page(current->cr3, page_addr, (uint64_t)(uintptr_t)new_page, flags);
         if (ret < 0) {
             log_printf(LOG_LEVEL_ERR, "Lazy alloc: map_user_page failed at CR2=%p\n",
                        (void *)cr2);
@@ -672,7 +679,6 @@ void pf_handler_c(uint64_t error_code) {
 
         log_printf(LOG_LEVEL_DEBUG, "Lazy alloc: mapped %p -> %p (user RW)\n",
                    (void *)page_addr, new_page);
-        perf_inc(PERF_PAGE_FAULTS);
         return;
     }
 
@@ -852,14 +858,12 @@ void free_pagetable(uint64_t pml4_phys) {
                     if (!(pte & PTE_PRESENT)) continue;
 
                     uint64_t page_phys = pte & PTE_ADDR_MASK;
-                    uint32_t ref = page_ref_get(page_phys);
-
-                    if (ref > 0) {
-                        page_ref_dec(page_phys);  /* write back to page_array */
-                        ref--;
-                    }
-                    if (ref == 0) {
-                        free_page((void *)(uintptr_t)page_phys);
+                    struct page *pg = page_of_phys(page_phys);
+                    if (pg) {
+                        uint32_t old_ref = __sync_sub_and_fetch(&pg->ref_count, 1);
+                        if (old_ref == 0) {
+                            free_page((void *)(uintptr_t)page_phys);
+                        }
                     }
                     /* else: page still referenced by another process */
                 }
