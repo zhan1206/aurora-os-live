@@ -1181,6 +1181,13 @@ static long sys_getsockname(int sockfd, struct sockaddr_in *addr, int *addrlen) 
 /* ================================================================
  * SYS_ACCESS — Check file access permissions
  * ================================================================ */
+
+/* access() mode flags (POSIX) */
+#define F_OK 0  /* test existence */
+#define X_OK 1  /* test execute permission */
+#define W_OK 2  /* test write permission */
+#define R_OK 4  /* test read permission */
+
 static long sys_access(const char *path, int mode) {
     if (!path) { current->t_errno = EFAULT; return -1; }
     char kpath[256];
@@ -1191,8 +1198,27 @@ static long sys_access(const char *path, int mode) {
     struct inode *inode = vfs_lookup(kpath);
     if (!inode) { current->t_errno = ENOENT; return -1; }
 
-    /* Simplified: always allow access (real permissions not implemented) */
-    (void)mode;
+    /* F_OK (mode == 0): just check existence — already done above */
+    if (mode == F_OK) return 0;
+
+    /* R_OK (read): always allow for now (simplified) */
+    if (mode & R_OK) {
+        /* No per-inode read permission bits yet; always pass */
+    }
+
+    /* W_OK (write): check if the file is writable */
+    if (mode & W_OK) {
+        /* Directories are not writable via access() for simplicity */
+        if (inode->is_dir) { current->t_errno = EACCES; return -1; }
+        /* TODO: check per-inode write permission bits */
+    }
+
+    /* X_OK (execute): check if the file is a regular file */
+    if (mode & X_OK) {
+        if (inode->is_dir) { current->t_errno = EACCES; return -1; }
+        /* TODO: check executable permission bits */
+    }
+
     return 0;
 }
 
@@ -1410,12 +1436,19 @@ static long sys_nice(int inc) {
  * SYS_BRK — Change program break (data segment end)
  * ================================================================ */
 static long sys_brk(void *addr) {
-    /* Simplified: always succeeds, returns the requested address */
+    if (!current) { current->t_errno = ESRCH; return -1; }
     if (!addr) {
-        /* Return current brk (we don't track it, return 0) */
-        return 0;
+        /* Return current brk */
+        return (long)current->brk;
     }
-    return (long)(uintptr_t)addr;
+    /* Set new brk */
+    uint64_t new_brk = (uint64_t)(uintptr_t)addr;
+    if (new_brk < 0x70000000ULL) {
+        current->t_errno = EINVAL;
+        return -1;
+    }
+    current->brk = new_brk;
+    return (long)new_brk;
 }
 
 /* ================================================================
@@ -1423,15 +1456,15 @@ static long sys_brk(void *addr) {
  * often implemented in libc)
  * ================================================================ */
 static long sys_sbrk(intptr_t increment) {
-    /* Simplified: sbrk via brk */
-    static uint64_t current_brk = 0x70000000ULL;  /* heap start */
-    if (increment == 0) return (long)current_brk;
+    if (!current) { current->t_errno = ESRCH; return -1; }
 
-    uint64_t old_brk = current_brk;
-    uint64_t new_brk = current_brk + (uint64_t)increment;
+    if (increment == 0) return (long)current->brk;
+
+    uint64_t old_brk = current->brk;
+    uint64_t new_brk = current->brk + (uint64_t)increment;
 
     /* Bug #7: overflow check — a large increment could wrap around */
-    if (increment > 0 && new_brk < current_brk) {
+    if (increment > 0 && new_brk < current->brk) {
         current->t_errno = EINVAL;
         return -1;
     }
@@ -1473,8 +1506,69 @@ static long sys_sbrk(intptr_t increment) {
         kfree(alloced_pages);
     }
 
-    current_brk = new_brk;
+    current->brk = new_brk;
     return (long)old_brk;
+}
+
+/* ================================================================
+ * SYS_GETENV — Get environment variable value
+ * ================================================================ */
+static long sys_getenv(const char *name, char *value, size_t size) {
+    if (!current) { current->t_errno = ESRCH; return -1; }
+    if (!name || !value || size == 0) { current->t_errno = EINVAL; return -1; }
+    if (!user_addr_range_ok(name, 1) || !user_addr_range_ok(value, size)) {
+        current->t_errno = EFAULT; return -1;
+    }
+
+    for (int i = 0; i < current->env_count; i++) {
+        if (strcmp(current->env_keys[i], name) == 0) {
+            size_t len = strlen(current->env_vals[i]);
+            if (len >= size) len = size - 1;
+            memcpy(value, current->env_vals[i], len);
+            value[len] = '\0';
+            return 0;
+        }
+    }
+    current->t_errno = ENOENT;
+    return -1;
+}
+
+/* ================================================================
+ * SYS_SETENV — Set environment variable value
+ * ================================================================ */
+static long sys_setenv(const char *name, const char *value) {
+    if (!current) { current->t_errno = ESRCH; return -1; }
+    if (!name || !value) { current->t_errno = EINVAL; return -1; }
+    if (!user_addr_range_ok(name, 1) || !user_addr_range_ok(value, 1)) {
+        current->t_errno = EFAULT; return -1;
+    }
+
+    /* Look for existing key */
+    for (int i = 0; i < current->env_count; i++) {
+        if (strcmp(current->env_keys[i], name) == 0) {
+            /* Update existing value */
+            size_t j;
+            for (j = 0; j < sizeof(current->env_vals[i]) - 1 && value[j]; j++)
+                current->env_vals[i][j] = value[j];
+            current->env_vals[i][j] = '\0';
+            return 0;
+        }
+    }
+
+    /* Add new key */
+    if (current->env_count >= 16) {
+        current->t_errno = ENOMEM;
+        return -1;
+    }
+    size_t j;
+    for (j = 0; j < sizeof(current->env_keys[current->env_count]) - 1 && name[j]; j++)
+        current->env_keys[current->env_count][j] = name[j];
+    current->env_keys[current->env_count][j] = '\0';
+    for (j = 0; j < sizeof(current->env_vals[current->env_count]) - 1 && value[j]; j++)
+        current->env_vals[current->env_count][j] = value[j];
+    current->env_vals[current->env_count][j] = '\0';
+    current->env_count++;
+    return 0;
 }
 
 /* ================================================================
@@ -1643,35 +1737,18 @@ struct rlimit {
     uint64_t rlim_max;
 };
 
-#define RLIMIT_STACK    3
-#define RLIMIT_NOFILE   7
-#define RLIMIT_AS       9
-
 static long sys_getrlimit(int resource, struct rlimit *rlim) {
     if (!rlim || !user_addr_range_ok(rlim, sizeof(struct rlimit))) {
         current->t_errno = EFAULT; return -1;
     }
 
-    struct rlimit rl;
-    memset(&rl, 0, sizeof(rl));
-
-    switch (resource) {
-        case RLIMIT_STACK:
-            rl.rlim_cur = 8 * 1024 * 1024;  /* 8 MB */
-            rl.rlim_max = 8 * 1024 * 1024;
-            break;
-        case RLIMIT_NOFILE:
-            rl.rlim_cur = MAX_FDS;
-            rl.rlim_max = MAX_FDS;
-            break;
-        case RLIMIT_AS:
-            rl.rlim_cur = 0xFFFFFFFFFFFFFFFFULL;
-            rl.rlim_max = 0xFFFFFFFFFFFFFFFFULL;
-            break;
-        default:
-            current->t_errno = EINVAL;
-            return -1;
+    if (resource < 0 || resource >= 16) {
+        current->t_errno = EINVAL; return -1;
     }
+
+    struct rlimit rl;
+    rl.rlim_cur = current->rlimit_cur[resource];
+    rl.rlim_max = current->rlimit_max[resource];
 
     if (copy_to_user(rlim, &rl, sizeof(rl)) != 0) {
         current->t_errno = EFAULT; return -1;
@@ -1680,15 +1757,44 @@ static long sys_getrlimit(int resource, struct rlimit *rlim) {
 }
 
 /* ================================================================
- * SYS_SETRLIMIT — Set resource limits (simplified)
+ * SYS_SETRLIMIT — Set resource limits
  * ================================================================ */
 static long sys_setrlimit(int resource, const struct rlimit *rlim) {
     if (!rlim || !user_addr_range_ok(rlim, sizeof(struct rlimit))) {
         current->t_errno = EFAULT; return -1;
     }
 
-    /* Simplified: accept all, no-op */
-    (void)resource;
+    if (resource < 0 || resource >= 16) {
+        current->t_errno = EINVAL; return -1;
+    }
+
+    /* Only support known resources */
+    switch (resource) {
+        case RLIMIT_CPU:
+        case RLIMIT_DATA:
+        case RLIMIT_STACK:
+        case RLIMIT_NOFILE:
+        case RLIMIT_AS:
+            break;
+        default:
+            current->t_errno = EINVAL;
+            return -1;
+    }
+
+    struct rlimit rl;
+    if (copy_from_user(&rl, rlim, sizeof(rl)) != 0) {
+        current->t_errno = EFAULT; return -1;
+    }
+
+    /* rlim_cur must not exceed rlim_max */
+    if (rl.rlim_cur > rl.rlim_max) {
+        current->t_errno = EINVAL;
+        return -1;
+    }
+
+    current->rlimit_cur[resource] = rl.rlim_cur;
+    current->rlimit_max[resource] = rl.rlim_max;
+
     return 0;
 }
 
@@ -1835,6 +1941,8 @@ long handle_syscall(int num, uint64_t a1, uint64_t a2, uint64_t a3,
         case SYS_GETRLIMIT: ret = sys_getrlimit((int)a1, (struct rlimit *)a2); break;
         case SYS_SETRLIMIT: ret = sys_setrlimit((int)a1, (const struct rlimit *)a2); break;
         case SYS_SCHED_YIELD: ret = sys_sched_yield(); break;
+        case SYS_GETENV:  ret = sys_getenv((const char *)a1, (char *)a2, (size_t)a3); break;
+        case SYS_SETENV:  ret = sys_setenv((const char *)a1, (const char *)a2); break;
         case SYS_GETRANDOM: ret = sys_getrandom((void *)a1, (size_t)a2, (unsigned int)a3); break;
         default:
             current->t_errno = ENOSYS;

@@ -79,7 +79,42 @@ void smp_send_ipi(int cpu_id, int vector);
 void smp_tlb_shootdown(uint64_t vaddr);
 
 /* ================================================================
- * Atomic spinlock (replaces CLI/STI-based spinlock)
+ * Unified Lock Abstraction (v4.0.9)
+ *
+ * MANDATORY LOCKING RULES:
+ *   1. spin_lock_irqsave() / spin_unlock_irqrestore():
+ *      MUST be used when the critical section is accessed from BOTH
+ *      interrupt and non-interrupt context (e.g., run queue lock,
+ *      buddy allocator, slab allocator). Stores flags in a CALLER-LOCAL
+ *      variable to prevent SMP races.
+ *
+ *   2. spin_lock() / spin_unlock():
+ *      Only safe when the lock is NEVER accessed from interrupt context.
+ *      Use spin_lock_irqsave() if unsure.
+ *
+ *   3. All spin_lock operations must be paired with spin_unlock on
+ *      every code path (including error returns).
+ *
+ *   4. Lock ordering: VFS lock → signal lock → scheduler lock.
+ *      Never acquire a lock that is already held in the current context.
+ *
+ * Error Handling Convention:
+ *   - Functions return 0 on success, negative value on error.
+ *   - Use goto-based cleanup labels for resource deallocation.
+ *   - Example:
+ *       int foo(void) {
+ *           void *a = kmalloc(N); if (!a) return -ENOMEM;
+ *           void *b = kmalloc(N); if (!b) { ret = -ENOMEM; goto out_a; }
+ *           ret = 0;
+ *       out_b: kfree(b);
+ *       out_a: kfree(a);
+ *           return ret;
+ *       }
+ *
+ * User Space API Stability:
+ *   - Syscall numbers are defined in kernel/syscall.h.
+ *   - Once a syscall number is assigned, do NOT reuse or renumber.
+ *   - New syscalls should be appended to the end of the enum.
  * ================================================================ */
 
 typedef struct spinlock {

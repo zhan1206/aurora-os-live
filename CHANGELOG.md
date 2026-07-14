@@ -1,5 +1,79 @@
 # AuroraOS Changelog
 
+## v4.0.9 (2026-07-13) — 发展阶段推进：安全加固 + 进程模型 + 架构规范
+
+基于后续发展建议，完成了阶段一验证、阶段二安全加固、阶段三进程模型改进，以及架构建议文档化。
+
+### 阶段一：稳定性基座（验证通过）
+所有四项已在 v4.0.7/v4.0.8 中完成：
+- 所有 Critical 和 High 修复 → v4.0.7 + v4.0.8
+- 内核栈隔离（per-CPU 内核栈）→ v4.0.8 C7
+- 管道唤醒机制 → v4.0.8 C4
+- VFS 锁补齐（全部操作加锁）→ v4.0.8 #21
+
+### 阶段二：安全加固（4项实施）
+
+**1. 启用 MODULE_SIGN_CHECK**
+- `Makefile` CFLAGS_BASE 新增 `-DMODULE_SIGN_CHECK`
+- 所有内核模块加载时强制 SHA-256 签名验证
+- 开发构建可移除此宏以跳过验证
+
+**2. ChaCha20 CSPRNG 替换 xorshift64**
+- `kernel/aslr.c` 完全重写随机数生成器
+- 实现完整的 ChaCha20 算法（quarter round + 20轮 block + stream encrypt）
+- 256-bit 密钥 + 96-bit nonce，密钥从 TSC + RDRAND 熵派生
+- `chacha20_random()` 每次返回 64 字节，counter 递增
+- `aslr_randomize_base/stack/mmap` 全部使用 ChaCha20
+
+**3. 改进 sys_access()**
+- 实现 POSIX 访问模式检查（F_OK / R_OK / W_OK / X_OK）
+- W_OK 拒绝目录写入，X_OK 拒绝目录执行
+- 返回正确的 errno（EACCES, ENOENT）
+
+**4. 实现 sys_setrlimit/sys_getrlimit**
+- `task_struct` 新增 `rlimit_cur[16]` / `rlimit_max[16]` 数组
+- 支持 RLIMIT_CPU, RLIMIT_DATA, RLIMIT_STACK, RLIMIT_NOFILE, RLIMIT_AS
+- `sys_setrlimit` 从用户空间拷贝并验证 rlim_cur <= rlim_max
+- `sys_getrlimit` 读取当前限制值
+- 默认限制在 `create_task()` 中初始化
+
+### 阶段三：进程模型改进（2项实施）
+
+**1. Per-process brk**
+- `task_struct` 新增 `uint64_t brk` 字段
+- `sys_brk` 和 `sys_sbrk` 移除全局 static 变量，改用 `current->brk`
+- 每个进程独立管理堆空间，初始值 0x70000000ULL
+- 在 `create_task()` 中初始化
+
+**2. Per-process 环境变量**
+- `task_struct` 新增 `env_keys[16][64]` / `env_vals[16][256]` / `env_count`
+- 移除 shell.c 中的全局 `g_env_keys`/`g_env_vals`/`g_env_count`
+- 新增 syscall: `sys_getenv` (SYS_GETENV=257) 和 `sys_setenv` (SYS_SETENV=258)
+- 默认环境变量（HOME, USER, SHELL, PWD, TERM, PATH, LANG, HOSTNAME）在 `do_env` 首次调用时初始化
+- shell.c 的 `env_set`/`env_get`/`do_env` 使用 `current->env_*`
+
+### 架构建议（文档化）
+
+**smp.h 新增统一锁抽象文档**：
+- 强制规则：中断+非中断共享锁必须用 `spin_lock_irqsave`
+- flags 必须存储在调用者局部变量中
+- 锁顺序：VFS → signal → scheduler
+- 错误处理：goto 标签清理模式
+- 用户空间 API 稳定性：syscall 号分配后不可重用
+
+### 已知阶段三/四未完成项（后续版本规划）
+- 真实端口绑定、poll/select 数据可用性检查、TCP 状态机完善
+- snprintf 替代 sprintf、libc malloc 实现
+- per-CPU 数据结构、AP IPI 机制、CPU 亲和性
+- ACPI 电源管理、写回缓存、磁盘配额
+- 内核单元测试、KASAN、QEMU 自动化回归、fuzzing
+
+### 版本控制
+- 版本号: v4.0.9
+- 修改文件: 8 个核心文件
+
+---
+
 ## v4.0.8 (2026-07-13) — 第二轮全项目深度修复 + 新发现47个Bug
 
 经过对 v4.0.7 修复质量的深度审查，修复了 5 个部分修复和 6 个未修复的遗留问题，同时发现并修复 47 个新 Bug。

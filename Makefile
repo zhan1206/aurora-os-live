@@ -51,10 +51,12 @@ BUILD_DATE := $(shell date -u +'%Y-%m-%d %H:%M' 2>/dev/null || echo "unknown")
 GIT_HASH   := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 BUILD_TYPE ?= release
 
+# -DMODULE_SIGN_CHECK enforces SHA-256 signature verification on all loaded modules.
+# Remove this flag for development builds where module signing is not required.
 CFLAGS_BASE := -ffreestanding -Wall -Wextra -fno-pic -fstack-protector-strong -mno-sse \
                -mgeneral-regs-only -mno-red-zone -Ikernel/include -std=gnu17 \
                -DBUILD_DATE="\"$(BUILD_DATE)\"" -DGIT_HASH="\"$(GIT_HASH)\"" \
-               -DBUILD_TYPE="\"$(BUILD_TYPE)\""
+               -DBUILD_TYPE="\"$(BUILD_TYPE)\"" -DMODULE_SIGN_CHECK
 
 # UEFI bootloader flags (position-independent, ms_abi)
 UEFI_CFLAGS := -ffreestanding -fpic -fno-stack-protector -mno-sse \

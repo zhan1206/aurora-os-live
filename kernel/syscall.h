@@ -79,6 +79,8 @@ enum {
     SYS_CLOCK_GETTIME = 228,
     /* Custom AuroraOS syscalls */
     SYS_SBRK      = 256,
+    SYS_GETENV    = 257,
+    SYS_SETENV    = 258,
     SYS_SYSINFO   = 99,
     SYS_GETRLIMIT = 97,
     SYS_SETRLIMIT = 160,

@@ -252,6 +252,21 @@ struct task_struct *create_task(void (*fn)(void)) {
     if (!t) return NULL;
     memset(t, 0, sizeof(*t));
 
+    /* Initialize default resource limits */
+    t->rlimit_cur[RLIMIT_CPU]    = 0xFFFFFFFFFFFFFFFFULL;  /* unlimited */
+    t->rlimit_max[RLIMIT_CPU]    = 0xFFFFFFFFFFFFFFFFULL;
+    t->rlimit_cur[RLIMIT_DATA]   = 0xFFFFFFFFFFFFFFFFULL;  /* unlimited */
+    t->rlimit_max[RLIMIT_DATA]   = 0xFFFFFFFFFFFFFFFFULL;
+    t->rlimit_cur[RLIMIT_STACK]  = 8 * 1024 * 1024;        /* 8 MB */
+    t->rlimit_max[RLIMIT_STACK]  = 8 * 1024 * 1024;
+    t->rlimit_cur[RLIMIT_NOFILE] = MAX_FDS;
+    t->rlimit_max[RLIMIT_NOFILE] = MAX_FDS;
+    t->rlimit_cur[RLIMIT_AS]     = 0xFFFFFFFFFFFFFFFFULL;  /* unlimited */
+    t->rlimit_max[RLIMIT_AS]     = 0xFFFFFFFFFFFFFFFFULL;
+
+    /* Initialize per-process brk (heap start) */
+    t->brk = 0x70000000ULL;
+
     /* Set default working directory */
     t->cwd[0] = '/';
     t->cwd[1] = '\0';

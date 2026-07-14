@@ -42,6 +42,13 @@ typedef enum {
 /* Task flags */
 #define TASK_SECCOMP  0x100  /* task has seccomp filter installed */
 
+/* Resource limit indices (rlimit_cur/rlimit_max arrays in task_struct) */
+#define RLIMIT_CPU      0
+#define RLIMIT_DATA     2
+#define RLIMIT_STACK    3
+#define RLIMIT_NOFILE   7
+#define RLIMIT_AS       9
+
 /* Forward declaration for linked list */
 struct task_struct;
 
@@ -91,6 +98,14 @@ struct task_struct {
     /* --- Signals --- */
     struct signal_state *sig;  /* per-task signal state (lazy alloc) */
 
+    /* --- Memory management --- */
+    uint64_t  brk;             /* program break (heap end) for this process */
+
+    /* --- Environment variables --- */
+    char      env_keys[16][64];   /* environment variable keys */
+    char      env_vals[16][256];  /* environment variable values */
+    int       env_count;          /* number of environment variables */
+
     /* --- Current working directory --- */
     char      cwd[256];        /* current working directory path */
 
@@ -112,6 +127,10 @@ struct task_struct {
     uint64_t  page_fault_count; /* total page faults this task */
     uint64_t  cpu_ticks;       /* total ticks this task has run */
     uint64_t  cswitch_count;   /* number of context switches into this task */
+
+    /* --- Resource limits --- */
+    uint64_t  rlimit_cur[16];  /* soft resource limits (RLIMIT_*) */
+    uint64_t  rlimit_max[16];  /* hard resource limits (RLIMIT_*) */
 };
 
 #include "signal.h"

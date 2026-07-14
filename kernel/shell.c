@@ -1564,47 +1564,47 @@ static void do_uptime(const char *args) {
     console_putc('\n');
 }
 
-/* Simple environment variable store (key=value pairs) */
-#define ENV_MAX 32
-static char g_env_keys[ENV_MAX][64];
-static char g_env_vals[ENV_MAX][256];
-static int  g_env_count = 0;
+/* Simple environment variable store (key=value pairs) — now per-process */
+#define ENV_MAX 16
 
 static void env_set(const char *key, const char *val) {
-    for (int i = 0; i < g_env_count; i++) {
-        if (strcmp(g_env_keys[i], key) == 0) {
-            /* Safe copy with bounds: val fits in g_env_vals[i] */
+    if (!current) return;
+    for (int i = 0; i < current->env_count; i++) {
+        if (strcmp(current->env_keys[i], key) == 0) {
+            /* Safe copy with bounds: val fits in current->env_vals[i] */
             size_t j;
-            for (j = 0; j < sizeof(g_env_vals[i]) - 1 && val[j]; j++)
-                g_env_vals[i][j] = val[j];
-            g_env_vals[i][j] = '\0';
+            for (j = 0; j < sizeof(current->env_vals[i]) - 1 && val[j]; j++)
+                current->env_vals[i][j] = val[j];
+            current->env_vals[i][j] = '\0';
             return;
         }
     }
-    if (g_env_count < ENV_MAX) {
-        /* Safe copy with bounds: key fits in g_env_keys[g_env_count] */
+    if (current->env_count < ENV_MAX) {
+        /* Safe copy with bounds: key fits in current->env_keys[current->env_count] */
         size_t j;
-        for (j = 0; j < sizeof(g_env_keys[g_env_count]) - 1 && key[j]; j++)
-            g_env_keys[g_env_count][j] = key[j];
-        g_env_keys[g_env_count][j] = '\0';
-        for (j = 0; j < sizeof(g_env_vals[g_env_count]) - 1 && val[j]; j++)
-            g_env_vals[g_env_count][j] = val[j];
-        g_env_vals[g_env_count][j] = '\0';
-        g_env_count++;
+        for (j = 0; j < sizeof(current->env_keys[current->env_count]) - 1 && key[j]; j++)
+            current->env_keys[current->env_count][j] = key[j];
+        current->env_keys[current->env_count][j] = '\0';
+        for (j = 0; j < sizeof(current->env_vals[current->env_count]) - 1 && val[j]; j++)
+            current->env_vals[current->env_count][j] = val[j];
+        current->env_vals[current->env_count][j] = '\0';
+        current->env_count++;
     }
 }
 
 static __attribute__((unused)) const char *env_get(const char *key) {
-    for (int i = 0; i < g_env_count; i++) {
-        if (strcmp(g_env_keys[i], key) == 0) return g_env_vals[i];
+    if (!current) return NULL;
+    for (int i = 0; i < current->env_count; i++) {
+        if (strcmp(current->env_keys[i], key) == 0) return current->env_vals[i];
     }
     return NULL;
 }
 
 static void do_env(const char *args) {
     (void)args;
+    if (!current) return;
     /* Initialize some default env vars if not set */
-    if (g_env_count == 0) {
+    if (current->env_count == 0) {
         env_set("HOME", "/");
         env_set("USER", "guest");
         env_set("SHELL", "/bin/aurora-sh");
@@ -1615,21 +1615,21 @@ static void do_env(const char *args) {
         env_set("HOSTNAME", "aurora");
     }
 
-    if (g_env_count == 0) {
+    if (current->env_count == 0) {
         console_write_ansi(CLR_MUTED);
         console_write("  No environment variables set\n");
         console_write_ansi(SGR_RESET);
         return;
     }
 
-    for (int i = 0; i < g_env_count; i++) {
+    for (int i = 0; i < current->env_count; i++) {
         console_write_ansi(CLR_INFO);
         console_write("  ");
-        console_write(g_env_keys[i]);
+        console_write(current->env_keys[i]);
         console_write_ansi(SGR_RESET);
         console_write("=");
         console_write_ansi(CLR_TEXT_PRIMARY);
-        console_write(g_env_vals[i]);
+        console_write(current->env_vals[i]);
         console_write_ansi(SGR_RESET);
         console_putc('\n');
     }
