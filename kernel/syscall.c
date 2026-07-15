@@ -315,6 +315,14 @@ static long sys_mmap(void *addr, size_t length, int prot, int flags,
     size_t num_pages = (length + PAGE_SIZE - 1) / PAGE_SIZE;
     uint64_t map_va = 0x60000000ULL; /* Fixed mapping region for now */
 
+    /* Reject mappings that would overlap kernel space.
+     * User space ends at 0x00007FFFFFFFFFFF; kernel space starts above that.
+     * The fixed mapping region (0x60000000) is well within user space, but
+     * we guard against length overflow or future changes to the base. */
+    if (map_va + length < map_va || map_va + length > 0x00007FFFFFFFFFFFULL) {
+        current->t_errno = ENOMEM; return -1;
+    }
+
     /* Track physical pages for cleanup on failure */
     void *phys_pages[64];  /* reasonable upper bound for mmap */
     if (num_pages > 64) { current->t_errno = ENOMEM; return -1; }
@@ -451,6 +459,13 @@ static long sys_execve(const char *path, char *const argv[], char *const envp[])
     }
     (void)envp;
 
+    /*
+     * NOTE: The deep-copied argv strings are not forwarded to exec_elf()
+     * because exec_elf() currently only accepts a path and does not support
+     * passing argv/envp to the new process image.  The kargv[] data is
+     * discarded after the task name is extracted.  Future work: extend
+     * exec_elf() to accept argv/envp and populate the new process's stack.
+     */
     int ret = exec_elf(kpath);
     if (ret < 0) current->t_errno = ENOENT;
     return ret;
@@ -967,6 +982,16 @@ static long sys_nanosleep(const struct timespec *req, struct timespec *rem) {
 
     uint64_t start_ticks = perf.uptime_ticks;
 
+    /*
+     * NOTE: nanosleep does not currently handle EINTR (interruption by
+     * a signal).  If a signal is delivered to the process while it is
+     * sleeping, the sleep is not interrupted and the remaining time is
+     * not reported.  POSIX requires nanosleep to return -1 with errno
+     * set to EINTR when interrupted by a signal handler.  A future
+     * implementation should check current->sig->pending after schedule()
+     * returns and, if a signal was delivered, calculate the remaining
+     * sleep time and return -EINTR.
+     */
     /* Set sleep_until and block */
     current->sleep_until = start_ticks + target_ticks;
     current->state = TASK_BLOCKED;

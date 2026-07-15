@@ -825,6 +825,7 @@ static int squashfs_read_directory(struct squashfs_sb_info *sbi,
         cur_offset += 2 + meta_size;  /* 2-byte header + data */
         if (meta_size < 8192 && read_pos < remaining) {
             /* This was the last metadata block — no more data to read */
+            kfree(block);
             break;
         }
         kfree(block);
@@ -953,6 +954,12 @@ static ssize_t squashfs_read_file(struct squashfs_sb_info *sbi,
 
         if (block_idx >= info->block_count) {
             /* Past the block list — must be fragment data */
+            break;
+        }
+
+        /* If the block_list allocation failed during inode read, avoid
+         * NULL pointer dereference. */
+        if (!info->block_list) {
             break;
         }
 

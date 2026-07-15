@@ -1009,6 +1009,15 @@ void smp_send_ipi(int cpu_id, int vector) {
 
     int lapic_id = cpu_data[cpu_id].lapic_id;
     lapic_send_ipi(lapic_id, vector);
+
+    /*
+     * Memory fence: ensure the ICR write is globally visible before
+     * the caller proceeds.  Without this, a subsequent write to shared
+     * memory (e.g. a TLB shootdown flag) could be reordered ahead of
+     * the IPI delivery on weakly-ordered architectures or by the CPU
+     * store buffer.  __sync_synchronize() emits a full memory barrier.
+     */
+    __sync_synchronize();
 }
 
 /* ================================================================

@@ -191,7 +191,26 @@ int sprintf(char *buf, const char *fmt, ...) {
                 int tn = itoa_int(v, tmp, 16);
                 for (int i = 0; i < tn && n < 500; i++) buf[n++] = tmp[i];
             } else if (*p == 'c') {
-                buf[n++] = (char)__builtin_va_arg(ap, int);
+                if (n < 500) buf[n++] = (char)__builtin_va_arg(ap, int);
+            } else if (*p == 'u') {
+                unsigned int v = __builtin_va_arg(ap, unsigned int);
+                char tmp[16]; int tn = 0;
+                if (v == 0) tmp[tn++] = '0';
+                while (v > 0 && tn < 15) { tmp[tn++] = '0' + (v % 10); v /= 10; }
+                for (int i = tn-1; i >= 0 && n < 500; i--) buf[n++] = tmp[i];
+            } else if (*p == 'x') {
+                unsigned int v = __builtin_va_arg(ap, unsigned int);
+                char tmp[16]; int tn = 0;
+                if (v == 0) tmp[tn++] = '0';
+                while (v > 0 && tn < 15) { int nib = v & 0xF; tmp[tn++] = nib < 10 ? '0'+nib : 'a'+nib-10; v >>= 4; }
+                if (n < 500) buf[n++] = '0';
+                if (n < 500) buf[n++] = 'x';
+                for (int i = tn-1; i >= 0 && n < 500; i--) buf[n++] = tmp[i];
+            } else if (*p == 'i') {
+                int v = __builtin_va_arg(ap, int);
+                char tmp[16];
+                int tn = itoa_int(v, tmp, 16);
+                for (int i = 0; i < tn && n < 500; i++) buf[n++] = tmp[i];
             } else {
                 buf[n++] = '%'; if (*p) buf[n++] = *p;
             }

@@ -721,10 +721,10 @@ static int fat32_find_free_slot(struct fat32_sb_info *sbi,
 /*
  * Compute the total size of a directory by walking the cluster chain.
  */
-static uint32_t fat32_get_dir_size(struct fat32_sb_info *sbi,
+static uint64_t fat32_get_dir_size(struct fat32_sb_info *sbi,
                                    uint32_t dir_cluster) {
     uint32_t cluster_size = sbi->cluster_size;
-    uint32_t total_size = 0;
+    uint64_t total_size = 0;
     uint32_t cluster = dir_cluster;
 
     while (cluster >= 2 && cluster < FAT32_CLUSTER_EOC_MIN) {
@@ -1754,8 +1754,8 @@ struct super_block *fat32_mount(struct block_device *bdev) {
         }
 
         /* Compute root directory size */
-        uint32_t root_size = fat32_get_dir_size(sbi, sbi->root_cluster);
-        root_inode->size = root_size;
+        uint64_t root_size = fat32_get_dir_size(sbi, sbi->root_cluster);
+        root_inode->size = (size_t)root_size;
         ((struct fat32_inode_info *)root_inode->priv)->file_size = root_size;
 
         /* Create the super_block */

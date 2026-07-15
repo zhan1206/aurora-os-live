@@ -53,15 +53,15 @@ void explain_exit(int pid, int code, int signal) {
     const char *s1;
 
     /* Build: "pid=N terminated by signal S" or "pid=N exited with code C" */
-    s1 = "pid="; while (*s1) *p++ = *s1++;
+    s1 = "pid="; while (*s1 && (size_t)(p - buf) < sizeof(buf) - 1) *p++ = *s1++;
     p += itoa(pid, p, sizeof(buf) - (size_t)(p - buf));
     if (signal) {
         s1 = " terminated by signal ";
-        while (*s1) *p++ = *s1++;
+        while (*s1 && (size_t)(p - buf) < sizeof(buf) - 1) *p++ = *s1++;
         p += itoa(signal, p, sizeof(buf) - (size_t)(p - buf));
     } else {
         s1 = " exited with code ";
-        while (*s1) *p++ = *s1++;
+        while (*s1 && (size_t)(p - buf) < sizeof(buf) - 1) *p++ = *s1++;
         p += itoa(code, p, sizeof(buf) - (size_t)(p - buf));
     }
     *p = '\0';
@@ -73,12 +73,13 @@ void explain_signal(int pid, int sig, const char *action) {
     char buf[112];
     char *p = buf;
     const char *s1;
-    s1 = "pid="; while (*s1) *p++ = *s1++;
+    s1 = "pid="; while (*s1 && (size_t)(p - buf) < sizeof(buf) - 1) *p++ = *s1++;
     p += itoa(pid, p, sizeof(buf) - (size_t)(p - buf));
-    s1 = " signal "; while (*s1) *p++ = *s1++;
+    s1 = " signal "; while (*s1 && (size_t)(p - buf) < sizeof(buf) - 1) *p++ = *s1++;
     p += itoa(sig, p, sizeof(buf) - (size_t)(p - buf));
-    *p++ = ':'; *p++ = ' ';
-    while (*action) *p++ = *action++;
+    if ((size_t)(p - buf) < sizeof(buf) - 1) *p++ = ':';
+    if ((size_t)(p - buf) < sizeof(buf) - 1) *p++ = ' ';
+    while (*action && (size_t)(p - buf) < sizeof(buf) - 1) *p++ = *action++;
     *p = '\0';
     explain_record(EXPLAIN_SIGNAL_DELIVER, (uint32_t)pid, buf);
 }
@@ -88,10 +89,11 @@ void explain_oom_kill(int victim_pid, const char *reason) {
     char buf[112];
     char *p = buf;
     const char *s1 = "OOM killed pid=";
-    while (*s1) *p++ = *s1++;
+    while (*s1 && (size_t)(p - buf) < sizeof(buf) - 1) *p++ = *s1++;
     p += itoa(victim_pid, p, sizeof(buf) - (size_t)(p - buf));
-    *p++ = ':'; *p++ = ' ';
-    while (*reason) *p++ = *reason++;
+    if ((size_t)(p - buf) < sizeof(buf) - 1) *p++ = ':';
+    if ((size_t)(p - buf) < sizeof(buf) - 1) *p++ = ' ';
+    while (*reason && (size_t)(p - buf) < sizeof(buf) - 1) *p++ = *reason++;
     *p = '\0';
     explain_record(EXPLAIN_OOM_KILL, (uint32_t)victim_pid, buf);
     log_printf(LOG_LEVEL_ERR, "explain: %s\n", buf);

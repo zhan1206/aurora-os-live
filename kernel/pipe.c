@@ -88,14 +88,19 @@ static ssize_t pipe_read(struct file *filp, void *buf, size_t count,
             pipe_spin_unlock(&ring->lock);
             return 0;  /* EOF */
         }
+        /* Set blocked_reader BEFORE releasing the lock to avoid a
+         * window where a concurrent write misses the wakeup. */
+        ring->blocked_reader = current;
         pipe_spin_unlock(&ring->lock);
 
         if (!current) return -1;
-        if (current->sig && current->sig->pending) { current->t_errno = EINTR; return -1; }
-        /* Mark ourselves as blocked reader, then block */
-        pipe_spin_lock(&ring->lock);
-        ring->blocked_reader = current;
-        pipe_spin_unlock(&ring->lock);
+        if (current->sig && current->sig->pending) {
+            /* Clear blocked_reader on early return */
+            pipe_spin_lock(&ring->lock);
+            if (ring->blocked_reader == current) ring->blocked_reader = NULL;
+            pipe_spin_unlock(&ring->lock);
+            current->t_errno = EINTR; return -1;
+        }
         current->state = TASK_BLOCKED;
         schedule();
         /* After wakeup, re-acquire lock and re-check */
@@ -205,17 +210,20 @@ static int pipe_close(struct inode *inode, struct file *filp) {
     /* Spinlock for SMP safety: prevent concurrent close from both ends */
     pipe_spin_lock(&ring->lock);
 
-    if (inode->name && inode->name[0] == 'r') {
+    /* Determine read/write end by comparing the inode's ops table */
+    if (inode->ops == &pipe_read_ops) {
         ring->read_open = 0;
     } else {
         ring->write_open = 0;
     }
 
-    /* If both ends closed, free the ring */
+    /* If both ends closed, free the ring.
+     * Clear inode->priv BEFORE releasing the lock to prevent another
+     * CPU from accessing the freed ring buffer. */
     if (!ring->read_open && !ring->write_open) {
+        inode->priv = NULL;
         pipe_spin_unlock(&ring->lock);
         kfree(ring);
-        inode->priv = NULL;
     } else {
         pipe_spin_unlock(&ring->lock);
     }

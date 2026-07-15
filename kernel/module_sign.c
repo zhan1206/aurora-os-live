@@ -165,9 +165,11 @@ struct module_sign_header {
 /* ================================================================
  * Embedded public key (compile-time constant)
  *
- * In production, this should be generated at build time and
- * injected by the build system. The current key is a placeholder
- * and must be replaced for any real security use.
+ * KNOWN LIMITATION: The public key is hardcoded in the source file.
+ * In production, this key should be generated at build time and injected
+ * by the build system (e.g., via a header file generated from a private
+ * key during the build process).  The current key is a placeholder and
+ * must be replaced for any real security use.
  * ================================================================ */
 static const uint8_t public_key[MODULE_SIGN_SIZE] = {
     0x41, 0x75, 0x72, 0x6f, 0x72, 0x61, 0x4f, 0x53,

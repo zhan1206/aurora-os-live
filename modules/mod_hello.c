@@ -43,7 +43,7 @@ extern void console_putc(char c);
 extern void log_printf(int level, const char *fmt, ...);
 
 /* Module state */
-static int greet_count = 0;
+static unsigned int greet_count = 0;
 
 /*
  * init: Module constructor
@@ -52,7 +52,16 @@ void init(void) {
     console_write("[mod_hello] init: Hello from the .km kernel module!\n");
     console_write("[mod_hello] Kernel version: ");
     console_write("v");
-    console_putc('0' + KERNEL_VERSION_MAJOR);
+    /* Print major version (supports multi-digit values like 10+) */
+    {
+        int major = KERNEL_VERSION_MAJOR;
+        if (major >= 10) {
+            console_putc('0' + (major / 10));
+            console_putc('0' + (major % 10));
+        } else {
+            console_putc('0' + major);
+        }
+    }
     console_putc('.');
     /* Print minor version digits */
     {

@@ -317,7 +317,9 @@ static int virtio_net_device_init(struct virtio_net_dev *dev) {
     /* Read MAC address from device config */
     if (dev->device_cfg) {
         struct virtio_net_config *cfg = (struct virtio_net_config *)dev->device_cfg;
-        memcpy(dev->netdev.mac, cfg->mac, 6);
+        if (sizeof(*cfg) >= 6) {
+            memcpy(dev->netdev.mac, cfg->mac, 6);
+        }
         dev->netdev.mtu = cfg->mtu;
         if (dev->netdev.mtu == 0) dev->netdev.mtu = 1500;
     } else {

@@ -135,7 +135,7 @@ void do_sys_sigreturn(void) {
             current_tf->r14 = frame.r14;
             current_tf->r13 = frame.r13;
             current_tf->r12 = frame.r12;
-            current_tf->r11 = frame.rflags;  /* R11 = RFLAGS for syscall exit */
+            current_tf->r11 = frame.rflags & 0x3F7FD7;  /* R11 = RFLAGS; mask IOPL/IF/NT/TF/AC */
             current_tf->r10 = frame.r10;
             current_tf->r9  = frame.r9;
             current_tf->r8  = frame.r8;

@@ -394,9 +394,11 @@ void phys_mem_init(void *mb_info) {
         /*
          * Detect Multiboot version by checking the info structure layout.
          *
-         * Magic values (MB1: 0x2BADB002, MB2: 0x36D76289) are passed in
-         * EAX by the bootloader, not stored in the info structure.  We use
-         * the info structure layout to distinguish versions:
+         * KNOWN LIMITATION: The Multiboot magic values (MB1: 0x2BADB002,
+         * MB2: 0x36D76289) are passed in EAX by the bootloader, NOT stored
+         * in the info structure.  Since this function only receives the info
+         * pointer (not the magic value), we cannot perform an explicit magic
+         * check.  Instead we use a heuristic based on the info structure layout:
          *   - Multiboot1 info: offset 0 = uint32_t flags, offset 4 = mem_lower
          *   - Multiboot2 info: offset 0 = uint32_t total_size, offset 4 = reserved (0)
          *
@@ -702,6 +704,12 @@ void *alloc_pages(uint32_t order) {
 
     buddy_unlock();
 
+    /*
+     * Identity-mapping cast: physical addresses within the first 1GB
+     * (KERNEL_PHYS_MAX) are identity-mapped, so the physical address is
+     * directly usable as a virtual address.  Addresses beyond this range
+     * are rejected by the check above.
+     */
     void *va = (void*)(uintptr_t)pa;
     memset(va, 0, (size_t)(PAGE_SIZE << order));
 
@@ -902,8 +910,11 @@ slab_pop:
         void *obj = cache->free_list;
         cache->free_list = *(void**)obj;
 
-        /* Zero the memory for security (prevent info leak) */
-        memset(obj, 0, size);
+        /* Zero the entire slab object for security (prevent info leak).
+         * Using cache->obj_size instead of the requested size ensures
+         * that residual data from previous allocations is cleared even
+         * when the object is larger than the request (NL3 fix). */
+        memset(obj, 0, cache->obj_size);
 
         slab_unlock();
         return obj;

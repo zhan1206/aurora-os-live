@@ -515,7 +515,15 @@ static int virtio_blk_do_io(struct virtio_blk_dev *dev, uint32_t type,
 
     /* Descriptor 1: data buffer (device-write for read, device-read for write) */
     addrs[1] = (uint64_t)(uintptr_t)data;
-    lens[1]  = sectors_to_io * dev->blk_size;
+    {
+        uint64_t data_len = (uint64_t)sectors_to_io * dev->blk_size;
+        if (data_len > UINT32_MAX) {
+            kfree(req);
+            kfree(status_byte);
+            return -1;
+        }
+        lens[1] = (uint32_t)data_len;
+    }
     flags_to_use[1] = (type == VIRTIO_BLK_T_IN) ? VIRTQ_DESC_F_WRITE : 0;
 
     /* Descriptor 2: status byte (device-write) */

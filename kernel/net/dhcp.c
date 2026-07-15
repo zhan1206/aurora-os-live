@@ -264,6 +264,10 @@ static int dhcp_request(void) {
 
 /* ================================================================
  * dhcp_handle_ack - Process DHCP ACK
+ *
+ * NOTE: Known limitation - this function does not cancel a retransmit
+ * timer. A full implementation would track retransmit timers and
+ * cancel them upon successful ACK receipt.
  * ================================================================ */
 static int dhcp_handle_ack(void) {
     uint8_t buf[600];

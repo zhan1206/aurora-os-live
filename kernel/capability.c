@@ -64,6 +64,23 @@
 int cap_fd_alloc(struct task_struct *t, void *filp, uint32_t caps) {
     if (!t || !filp) return -1;
 
+    /*
+     * NOTE: Currently any process can allocate capabilities via cap_fd_alloc.
+     * In a production system, this should be restricted: only root (PID 1)
+     * or the process itself should be allowed to modify its own capabilities.
+     * This is a known limitation of the current capability model.
+     */
+
+    /*
+     * ARCHITECTURAL LIMITATION: cap_fd_* and fd_* (file.c) share the same
+     * fd_table (uintptr_t fd_table[MAX_FDS]) but store different pointer
+     * types — cap_fd_alloc stores cap_entry* wrappers while fd_alloc stores
+     * raw file* pointers.  The two systems are NOT interoperable; mixing
+     * them will cause type confusion.  The magic field (CAP_ENTRY_MAGIC) in
+     * cap_get() mitigates this by rejecting non-cap entries, but the
+     * fundamental fix is to change fd_table to a union or typed array.
+     */
+
     struct cap_entry *entry = (struct cap_entry *)kmalloc(sizeof(*entry));
     if (!entry) return -1;
     entry->magic = CAP_ENTRY_MAGIC;  /* Bug #13: set magic for type-safety check */
@@ -133,6 +150,12 @@ void cap_fd_close_all(struct task_struct *t) {
 int fd_check_cap(int fd, uint32_t required) {
     struct cap_entry *entry = cap_get(current, fd);
     if (!entry) return -1;
+    /*
+     * KNOWN LIMITATION: This check only verifies the capability type
+     * (flags in entry->caps), not the resource ID.  A full capability
+     * system would also check that the fd refers to the expected resource
+     * (e.g., a specific file or socket) before granting access.
+     */
     if ((entry->caps & required) != required) {
         log_printf(LOG_LEVEL_WARN, "cap: fd %d lacks required caps 0x%x (has 0x%x)\n",
                    fd, required, entry->caps);

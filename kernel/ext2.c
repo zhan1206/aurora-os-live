@@ -105,6 +105,11 @@ static int ext2_read_inode_raw(struct ext2_sb_info *sbi, uint32_t inum,
                                struct ext2_inode *raw) {
     if (inum == 0) return -EINVAL;
 
+    /* Validate inode_size: zero or larger than block_size would cause
+     * division by zero or incorrect calculation (inodes_per_block = 0) */
+    if (sbi->inode_size == 0 || sbi->inode_size > sbi->block_size)
+        return -EINVAL;
+
     uint32_t group = inode_group(sbi, inum);
     uint32_t index = inode_index(sbi, inum);
 
@@ -624,6 +629,12 @@ static int ext2_dir_lookup(struct inode *dir, struct dentry *dentry) {
 
         /* Parse directory entries */
         while (block_offset < block_size) {
+            /* Bounds check: ensure offset hasn't gone past directory size */
+            if (off >= dir_size) {
+                kfree(block_buf);
+                return -ENOENT;
+            }
+
             struct ext2_dir_entry *de = (struct ext2_dir_entry *)(block_buf + block_offset);
             if (de->inode == 0 && de->rec_len == 0) {
                 /* End of directory */
@@ -806,6 +817,13 @@ ssize_t ext2_readdir(struct inode *dir, void *buf, size_t bufsize,
         }
 
         while (block_offset < block_size && total < bufsize) {
+            /* Bounds check: ensure offset hasn't gone past directory size */
+            if (pos >= dir_size) {
+                kfree(block_buf);
+                *offset = (off_t)pos;
+                return (ssize_t)total;
+            }
+
             struct ext2_dir_entry *de = (struct ext2_dir_entry *)(block_buf + block_offset);
 
             if (de->inode == 0 && de->rec_len == 0) {

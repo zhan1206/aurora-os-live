@@ -255,6 +255,16 @@ int vfs_mount(const char *path, struct super_block *sb) {
      */
     mount_dentry->flags |= DENTRY_FLAG_MOUNT;
 
+    /*
+     * NOTE: Inode reference counting for mount points is not yet
+     * implemented.  When a filesystem is mounted, the root inode's
+     * refcount should be incremented to prevent it from being freed
+     * while the mount is active.  Currently, the DENTRY_FLAG_MOUNT
+     * flag protects the inode from eviction, but a proper refcount
+     * would also protect against explicit inode free operations.
+     * vfs_umount() should decrement the refcount when unmounting.
+     */
+
     /* Add to root's children */
     dentry_add_child(root_dentry, mount_dentry);
     vfs_unlock();

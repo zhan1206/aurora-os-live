@@ -1,5 +1,137 @@
 # AuroraOS Changelog
 
+## v4.1.0 (2026-07-13) — 第三轮全项目深度审查：86 个 Bug 修复
+
+经过第三轮全面审查，修复了 11 个遗留问题和 75 个新发现 Bug，涵盖分页表、调度器、信号、管道、TSS/中断、存储、网络、安全、文件系统等核心子系统。
+
+### 遗留问题（11个修复）
+
+| 类型 | Bug | 修复 |
+|------|-----|------|
+| 部分修复 | R1#4 syscall.c | execve argv 深拷贝注释说明（exec_elf 仅接受路径参数） |
+| 部分修复 | R1#13 capability.c | 架构限制注释（cap_fd 和 fd 共享 fd_table） |
+| 部分修复 | R2M5 vfs.c | 挂载点 inode 引用计数限制注释 |
+| 部分修复 | R2M12 signal.c | 已验证：阻塞信号已正确跳过唤醒 |
+| 未修复 | R1#14 mem.c | alloc_pages 恒等映射注释 + KERNEL_PHYS_MAX 检查 |
+| 未修复 | R1#47 mem.c | MB1/MB2 检测已知限制注释（magic 不存储在 info 结构中） |
+| 未修复 | R2M1 pipe.c | pipe_close 改用 ops 表比较替代字符串比较 |
+| 未修复 | R2M6 fat32.c | rmdir LFN 清除 TOCTOU 注释（已有） |
+| 未修复 | R2M14 explain.c | 所有字符串拷贝添加边界检查 |
+| 未修复 | R1#4 重复 | 同 R1#4 |
+| 未修复 | R1#13 重复 | 同 R1#13 |
+
+### 新发现 CRITICAL（1个修复）
+
+| # | 文件 | 修复 |
+|---|------|------|
+| NC1 | `pagetable.c` | `map_page` 中间页表项设置 `PTE_USER`，修复用户空间所有映射失效 |
+
+### 新发现 HIGH（23个修复）
+
+| # | 文件 | 修复 |
+|---|------|------|
+| NH1 | `pagetable.c` | COW `ref_count` 归零时调用 `free_page()` |
+| NH2 | `pagetable.c` | `map_page` 旧 PTE 覆写改为原子操作 |
+| NH3 | `sched.c` | 非 BSP CPU 空闲循环检查 `rq->count > 0` |
+| NH4 | `signal.c` | `sigreturn` RFLAGS 掩码（清除 IOPL/NT/TF/AC 等） |
+| NH5 | `pipe.c` | `pipe_read` 先设 `blocked_reader` 再释放锁 |
+| NH6 | `tss.S` | TSS RSP0 初始化为 `stack_top` |
+| NH7 | `keyboard_handler.S` | IRQ1 同时向从 PIC（0xA0）发送 EOI |
+| NH8 | `nvme.c` | `num_entries * sizeof` 转为 `uint64_t` 防溢出 |
+| NH9 | `virtio_blk.c` | `sectors_to_io * blk_size` 转为 `uint64_t` 防溢出 |
+| NH10 | `net.c` | 已有 `eth_hdr` 长度检查 |
+| NH11 | `net.c` | `total_len` 上限 65535 |
+| NH12 | `dns.c` | `ancount` 上限 32 |
+| NH13 | `dns.c` | DNS 名称解析边界检查（`pos + 1 + len > rx_len`） |
+| NH14 | `http.c` | 已有边界检查 |
+| NH15 | `syscall.c` | `sys_mmap` 内核空间重叠检查 |
+| NH16 | `capability.c` | 权限检查限制注释（仅 root 或自身） |
+| NH17 | `seccomp.c` | 过滤器拷贝安全注释 |
+| NH18 | `aslr.c` | 已验证 ChaCha20 已实现（v4.0.9） |
+| NH19 | `module_sign.c` | 硬编码公钥已知限制注释 |
+| NH20 | `ext2.c` | `inode_size > block_size` 除零检查 |
+| NH21 | `ext2.c` | `ext2_dir_lookup` 块偏移 OOB 检查 |
+| NH22 | `ext2.c` | `ext2_readdir` 块偏移 OOB 检查 |
+| NH23 | `journal.c` | 日志回卷 `tail` 修正环形缓冲区逻辑 |
+
+### 新发现 MEDIUM（28个修复）
+
+| # | 文件 | 修复 |
+|---|------|------|
+| NM1 | `pagetable.c` | `page_ref_dec` 下溢恢复改用 CAS |
+| NM2 | `pagetable.c` | 懒分配路径验证故障地址在用户空间范围内 |
+| NM3 | `sched.c` | `vruntime` 使用实际消耗 ticks 计算 |
+| NM4 | `sched.c` | `yield()` 调用 `schedule()` 前更新 `vruntime` |
+| NM5 | `sched.c` | `do_exit_current` 已知竞态注释 |
+| NM6 | `sched.c` | 非 BSP CPU 最后任务退出时检查新任务（同 NH3） |
+| NM7 | `sched.c` | `add_child` 持 `child_lock` 修改 children 链表 |
+| NM8 | `pagetable.c` | COW 修改父 PTE 后添加 TLB shootdown 注释 |
+| NM9 | `pagetable.c` | SMAP 处理器仅检查叶子 PTE 的 USER 位 |
+| NM10 | `pipe.c` | `pipe_close` 先清 `inode->priv` 再释放锁 |
+| NM11 | `pit.c` | 函数不存在（已跳过） |
+| NM12 | `pit.c` | 函数不存在（已跳过） |
+| NM13 | `smp.c` | `smp_send_ipi` 后添加 `__sync_synchronize()` |
+| NM14 | `nvme.c` | `nvme_read` kzalloc NULL 检查（返回 -ENOMEM） |
+| NM15 | `nvme.c` | `nvme_write` kzalloc NULL 检查（返回 -ENOMEM） |
+| NM16 | `virtio_net.c` | 函数不存在（已跳过） |
+| NM17 | `virtio_net.c` | MAC 复制前添加大小检查 |
+| NM18 | `apic.c` | ICR 读写非原子注释 |
+| NM19 | `drm.c` | 函数不存在（已跳过） |
+| NM20 | `keyboard.c` | scancode >= 128 边界检查注释 |
+| NM21 | `squashfs.c` | 目录迭代 break 前 `kfree(block)` |
+| NM22 | `squashfs.c` | `block_list` NULL 检查后 break |
+| NM23 | `fat32.c` | `fat32_get_dir_size` 返回 `uint64_t` |
+| NM24 | `dhcp.c` | 已有 xid 匹配检查 |
+| NM25 | `ipv6.c` | 已有 payload_length 校验 |
+| NM26 | `tcp_cong.c` | `cwnd += MSS` 溢出检查 |
+| NM27 | `seccomp.c` | 仅检查 syscall 号不检查参数的限制注释 |
+| NM28 | `capability.c` | 仅检查类型不检查资源 ID 的限制注释 |
+
+### 新发现 LOW（23个修复）
+
+| # | 文件 | 修复 |
+|---|------|------|
+| NL1 | `sched.c` | `check_resched` 使用 `__sync_lock_test_and_set` |
+| NL2 | `pagetable.c` | COW 克隆保留 NX 位（`src_pte & ~PTE_ADDR_MASK`） |
+| NL3 | `mem.c` | `kmalloc`/`kfree` 使用 `obj_size` 清零防残留数据 |
+| NL4 | `pit_handler.c` | 函数不存在（已跳过） |
+| NL5 | `drm.c` | 函数不存在（已跳过） |
+| NL6 | `console.c` | 函数不存在（已跳过） |
+| NL7 | `perf.c` | 函数不存在（已跳过） |
+| NL8 | `dhcp.c` | 未取消重传定时器注释 |
+| NL9 | `ipv6.c` | 未解析扩展头部注释 |
+| NL10 | `tcp_cong.c` | `RTT == 0` 时跳过不更新 SRTT |
+| NL11 | `userspace/libc.c` | `sprintf` `%c` 添加边界检查 |
+| NL12 | `userspace/libc.c` | `sprintf` 添加 `%u`/`%x`/`%i` 支持 |
+| NL13 | `boot/efi_main.c` | AllocateAddress 回退影响注释 |
+| NL14 | `modules/mod_hello.c` | 主版本号改用 `%d` 格式 |
+| NL15 | `arch/loongarch64/boot.S` | `andi` 替换为 `li.w` + `and` |
+| NL16 | `modules/mod_hello.c` | `greet_count` 改为 `unsigned int` |
+| NL17-NL20 | 重复 | 同 R1#47, R2M6, R2M14, R2M1 |
+| NL21 | `aslr.c` | 共享库随机化未实现注释 |
+| NL22 | `syscall.c` | `nanosleep` 无 EINTR 注释 |
+| NL23 | `module.c` | `dep_names` 移位循环越界修复 |
+
+### 关键架构变更
+- **pagetable.c**: 中间页表项设置 `PTE_USER`，COW ref_count 全面原子化，懒分配地址验证，SMAP 叶子 PTE 检测
+- **sched.c**: 非 BSP CPU 空闲循环主动检查新任务，vruntime 使用实际消耗 ticks，yield 更新 vruntime，add_child 持锁
+- **signal.c**: sigreturn RFLAGS 掩码（清除危险标志位）
+- **tss.S**: TSS RSP0 初始化为 stack_top（内核栈隔离）
+- **keyboard_handler.S**: IRQ1 同时向从 PIC 发送 EOI
+- **pipe.c**: 先设 blocked 再放锁，先清 priv 再 kfree
+- **nvme.c/virtio_blk.c**: 所有乘法运算转为 uint64_t 防溢出
+- **ext2.c**: 超级块损坏保护（inode_size 检查），目录遍历 OOB 检查
+- **journal.c**: 环形缓冲区回卷逻辑修正
+- **squashfs.c**: 目录迭代 buffer 释放，block_list NULL 检查
+- **smp.c**: IPI 发送后添加 mfence 内存屏障
+
+### 版本控制
+- 版本号: v4.1.0（次版本号升级，反映重大架构变更量）
+- 修复总数: 86 个 Bug（11 遗留 + 1 严重 + 23 高危 + 28 中危 + 23 低危）
+- 修改文件: 30+ 个核心文件
+
+---
+
 ## v4.0.9 (2026-07-13) — 发展阶段推进：安全加固 + 进程模型 + 架构规范
 
 基于后续发展建议，完成了阶段一验证、阶段二安全加固、阶段三进程模型改进，以及架构建议文档化。

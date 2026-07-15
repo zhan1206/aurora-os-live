@@ -167,6 +167,8 @@ void keyboard_c_handler(void *stack) {
 
     /* --- Regular key: only process make codes --- */
     if (is_break) goto done;
+    /* Bounds check: reject scancodes >= 128 to prevent OOB access
+     * to scancode_base[128] and scancode_shifted[128] arrays. */
     if (make_code >= 128) goto done;
 
     /* --- E0-prefixed special keys --- */

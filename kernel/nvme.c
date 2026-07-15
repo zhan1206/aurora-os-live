@@ -10,6 +10,7 @@
 #include "block_dev.h"
 #include "include/log.h"
 #include "include/string.h"
+#include "include/errno.h"
 #include "mem.h"
 #include "smp.h"
 #include <stdint.h>
@@ -52,7 +53,9 @@ static void nvme_queue_init(struct nvme_queue *q, uint16_t qid,
     q->phase = 1;
 
     /* Allocate Submission Queue */
-    size_t sq_size = sizeof(struct nvme_sqe) * num_entries;
+    uint64_t sq_size64 = (uint64_t)num_entries * sizeof(struct nvme_sqe);
+    if (sq_size64 > SIZE_MAX) sq_size64 = SIZE_MAX;
+    size_t sq_size = (size_t)sq_size64;
     q->sq = (struct nvme_sqe *)kmalloc(sq_size);
     if (q->sq) {
         memset(q->sq, 0, sq_size);
@@ -60,7 +63,9 @@ static void nvme_queue_init(struct nvme_queue *q, uint16_t qid,
     }
 
     /* Allocate Completion Queue */
-    size_t cq_size = sizeof(struct nvme_cqe) * num_entries;
+    uint64_t cq_size64 = (uint64_t)num_entries * sizeof(struct nvme_cqe);
+    if (cq_size64 > SIZE_MAX) cq_size64 = SIZE_MAX;
+    size_t cq_size = (size_t)cq_size64;
     q->cq = (struct nvme_cqe *)kmalloc(cq_size);
     if (q->cq) {
         memset(q->cq, 0, cq_size);
@@ -429,7 +434,7 @@ static int nvme_io_submit(struct nvme_controller *ctrl,
             /* Need a PRP list */
             struct nvme_prp_list *prp_list =
                 (struct nvme_prp_list *)kmalloc(sizeof(*prp_list));
-            if (!prp_list) return -1;
+            if (!prp_list) return -ENOMEM;
             memset(prp_list, 0, sizeof(*prp_list));
 
             uint64_t data_addr = (buf_phys + 0x1000ULL) & ~0xFFFULL;

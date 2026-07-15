@@ -137,10 +137,12 @@ struct task_struct *find_task_by_pid(int pid) {
 static void add_child(struct task_struct *parent, struct task_struct *child) {
     struct child_node *node = (struct child_node *)kmalloc(sizeof(*node));
     if (!node) return;
+    spin_lock((spinlock_t*)&parent->child_lock);
     node->child = child;
     node->next = parent->children;
     parent->children = node;
     child->parent = parent;
+    spin_unlock((spinlock_t*)&parent->child_lock);
 }
 
 void reparent_children_to_init(struct task_struct *task) {
@@ -440,7 +442,13 @@ void schedule(void) {
         irq_restore(irq_flags);
         /* No tasks in this CPU's run queue — halt or try to steal */
         log_printf(LOG_LEVEL_ERR, "schedule: CPU %d has no tasks, halting\n", cpu_id);
-        for (;;) asm volatile ("cli; hlt");
+        for (;;) {
+            asm volatile ("cli; hlt");
+            if (rq->count > 0) break;
+        }
+        /* New tasks arrived, re-enter schedule */
+        schedule();
+        return;
     }
 
     /*
@@ -479,7 +487,12 @@ void schedule(void) {
             spin_unlock(&rq->lock);
             irq_restore(irq_flags);
             log_printf(LOG_LEVEL_ERR, "schedule: CPU %d no runnable tasks, halting\n", cpu_id);
-            for (;;) asm volatile ("cli; hlt");
+            for (;;) {
+                asm volatile ("cli; hlt");
+                if (rq->count > 0) break;
+            }
+            schedule();
+            return;
         }
     }
 
@@ -503,9 +516,14 @@ void schedule(void) {
     int prev_state = prev->state;
     if (prev_state == TASK_RUNNING) {
         prev->state = TASK_READY;
-        /* Task was preempted or yielded: add time_slice to vruntime */
-        uint64_t slice_used = (uint64_t)(prev->time_slice > 0 ? prev->time_slice : 1);
-        prev->vruntime += slice_used;
+        /* Task was preempted or yielded: add actual consumed ticks to vruntime.
+         * time_slice may have been recharged in schedule_tick(), so compute
+         * the actual consumed ticks as (full_slice - remaining). */
+        uint64_t full_slice = (uint64_t)(BASE_SLICE * (256 - prev->priority) / 256);
+        if (full_slice < 1) full_slice = 1;
+        int64_t consumed = (int64_t)full_slice - (int64_t)prev->time_slice;
+        if (consumed <= 0) consumed = (int64_t)full_slice;
+        prev->vruntime += (uint64_t)consumed;
         perf_inc(PERF_VRUNTIME_UPDATES);
     }
     /* If prev->state was TASK_BLOCKED or TASK_ZOMBIE, leave vruntime unchanged */
@@ -556,14 +574,21 @@ void schedule(void) {
 }
 
 void yield(void) {
-    if (current) current->state = TASK_READY;
+    if (current) {
+        /* Update vruntime for actual consumed ticks before yielding */
+        uint64_t full_slice = (uint64_t)(BASE_SLICE * (256 - current->priority) / 256);
+        if (full_slice < 1) full_slice = 1;
+        int64_t consumed = (int64_t)full_slice - (int64_t)current->time_slice;
+        if (consumed <= 0) consumed = (int64_t)full_slice;
+        current->vruntime += (uint64_t)consumed;
+        current->state = TASK_READY;
+    }
     schedule();
 }
 
 void check_resched(void) {
     extern volatile int need_resched;
-    if (need_resched || (current && current->need_resched)) {
-        need_resched = 0;
+    if (__sync_lock_test_and_set(&need_resched, 0) || (current && current->need_resched)) {
         if (current) {
             current->need_resched = 0;
             current->state = TASK_READY;
@@ -672,6 +697,11 @@ void do_exit_current(int code) {
     /*
      * Wake parent: if parent is blocked in waitpid(), set it to READY
      * so it can collect this ZOMBIE.
+     *
+     * KNOWN RACE: After waking the parent, the parent's waitpid() can
+     * free this child's task_struct while current (the child) is still
+     * using it. The child's stack is still valid until the context
+     * switch happens in schedule() below, so this is safe in practice.
      */
     if (current->parent && current->parent->state == TASK_BLOCKED) {
         log_printf(LOG_LEVEL_DEBUG, "exit: waking parent pid=%d\n",
@@ -695,7 +725,13 @@ void do_exit_current(int code) {
         spin_unlock(&rq->lock);
         irq_restore(exit_irq_flags);
         log_printf(LOG_LEVEL_INFO, "do_exit_current: last task exiting, halting\n");
-        for (;;) asm volatile ("cli; hlt");
+        for (;;) {
+            asm volatile ("cli; hlt");
+            if (rq->count > 0) break;
+        }
+        /* New tasks arrived, schedule them */
+        schedule();
+        /* NOTREACHED */
     }
 
     prev_node->next = current->next;

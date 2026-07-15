@@ -41,6 +41,9 @@ irq1_handler:
     mov $0x20, %al
     outb %al, $0x20
 
+    /* Send EOI to slave PIC (IRQ cascades through slave) */
+    outb %al, $0xA0
+
     iretq
 
     /* Mark stack as non-executable */

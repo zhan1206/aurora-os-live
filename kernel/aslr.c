@@ -251,3 +251,11 @@ uint64_t aslr_randomize_stack(void) {
 uint64_t aslr_randomize_mmap(void) {
     return aslr_randomize_base(ASLR_MMAP_BASE, ASLR_MAX_SHIFT);
 }
+
+/*
+ * NOTE: Shared library (DSO) load address randomization is not yet
+ * implemented.  Currently, all shared libraries loaded via the dynamic
+ * linker are placed at fixed addresses.  A future implementation should
+ * randomize the mmap base for each library independently, using the
+ * same ChaCha20 CSPRNG, to mitigate return-to-libc and similar attacks.
+ */

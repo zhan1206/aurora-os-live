@@ -204,8 +204,12 @@ static void page_ref_dec(uint64_t pa) {
     if (pg) {
         uint32_t old = __sync_fetch_and_sub(&pg->ref_count, 1);
         if (old == 0) {
-            /* Underflow: restore to 0 */
-            pg->ref_count = 0;
+            /*
+             * Underflow: ref_count was already 0 before decrement.
+             * Atomically restore to 0 using CAS to avoid racing with
+             * concurrent increments on other CPUs (NM1 fix).
+             */
+            __sync_bool_compare_and_swap(&pg->ref_count, 0xFFFFFFFF, 0);
         }
     }
 }
@@ -274,6 +278,16 @@ int map_page(uint64_t pml4_phys, uint64_t vaddr, uint64_t paddr, uint64_t flags)
     uint64_t pd_idx   = (vaddr >> 21) & 0x1FF;
     uint64_t pt_idx   = (vaddr >> 12) & 0x1FF;
 
+    /*
+     * Intermediate table entries (PML4, PDPT, PD) must carry PTE_USER
+     * when the leaf mapping is a user page. The x86_64 page walker
+     * checks U/S at every level, so a kernel-only intermediate entry
+     * would cause a #PF on user-space access even if the leaf PTE
+     * has PTE_USER set.
+     */
+    uint64_t struct_flags = PTE_STRUCT_FLAGS;
+    if (flags & PTE_USER) struct_flags |= PTE_USER;
+
     uint64_t *pml4 = phys_to_virt(pml4_phys);
     uint64_t entry  = pml4[pml4_idx];
     uint64_t pdpt_phys;
@@ -281,7 +295,7 @@ int map_page(uint64_t pml4_phys, uint64_t vaddr, uint64_t paddr, uint64_t flags)
     if (!(entry & PTE_PRESENT)) {
         pdpt_phys = alloc_table_page();
         if (!pdpt_phys) return -1;
-        pml4[pml4_idx] = pdpt_phys | PTE_STRUCT_FLAGS;
+        pml4[pml4_idx] = pdpt_phys | struct_flags;
     } else {
         pdpt_phys = entry & PTE_ADDR_MASK;
     }
@@ -293,7 +307,7 @@ int map_page(uint64_t pml4_phys, uint64_t vaddr, uint64_t paddr, uint64_t flags)
     if (!(entry & PTE_PRESENT)) {
         pd_phys = alloc_table_page();
         if (!pd_phys) return -1;
-        pdpt[pdpt_idx] = pd_phys | PTE_STRUCT_FLAGS;
+        pdpt[pdpt_idx] = pd_phys | struct_flags;
     } else {
         pd_phys = entry & PTE_ADDR_MASK;
     }
@@ -305,7 +319,7 @@ int map_page(uint64_t pml4_phys, uint64_t vaddr, uint64_t paddr, uint64_t flags)
     if (!(entry & PTE_PRESENT)) {
         pt_phys = alloc_table_page();
         if (!pt_phys) return -1;
-        pd[pd_idx] = pt_phys | PTE_STRUCT_FLAGS;
+        pd[pd_idx] = pt_phys | struct_flags;
     } else if (entry & PTE_PS) {
         /* 2MB huge page: split into 512 × 4KB pages */
         pt_phys = split_huge_page(pd, (int)pd_idx, vaddr);
@@ -327,10 +341,19 @@ int map_page(uint64_t pml4_phys, uint64_t vaddr, uint64_t paddr, uint64_t flags)
      */
     if (old_pte & PTE_PRESENT) {
         uint64_t old_phys = old_pte & PTE_ADDR_MASK;
-        uint32_t old_ref = page_ref_get(old_phys);
-        if (old_ref > 0) {
-            page_ref_dec(old_phys);
-            if (old_ref == 1) {
+        struct page *pg = page_of_phys(old_phys);
+        if (pg) {
+            /*
+             * Atomically decrement ref_count and check if the page
+             * should be freed. Using a single __sync_fetch_and_sub
+             * avoids the TOCTOU race between reading and decrementing
+             * (NH2 fix).
+             */
+            uint32_t old_ref = __sync_fetch_and_sub(&pg->ref_count, 1);
+            if (old_ref == 0) {
+                /* Underflow: restore to 0 */
+                __sync_bool_compare_and_swap(&pg->ref_count, 0xFFFFFFFF, 0);
+            } else if (old_ref == 1) {
                 /* Only this process had the page — free it */
                 free_page((void *)(uintptr_t)old_phys);
             }
@@ -505,8 +528,13 @@ uint64_t clone_current_pml4(void) {
                     }
 
                     uint64_t phys_page = src_pte & PTE_ADDR_MASK;
-                    uint64_t old_flags  = src_pte & 0xFFF;
-                    if (src_pte & PTE_NX) old_flags |= PTE_NX;
+                    /*
+                     * Capture all flags from the source PTE, including
+                     * PTE_NX (bit 63) which is outside the low 12 bits.
+                     * Using ~PTE_ADDR_MASK instead of 0xFFF ensures NX
+                     * and any other high flags are preserved (NL2 fix).
+                     */
+                    uint64_t old_flags  = src_pte & ~PTE_ADDR_MASK;
 
                     /* Increment ref_count for this shared physical page */
                     page_ref_inc(phys_page);
@@ -528,7 +556,17 @@ uint64_t clone_current_pml4(void) {
                     /* Child's PTE also read-only, same physical page */
                     dst_pt[l] = phys_page | cow_flags;
 
-                    /* Invalidate TLB for this VA in parent */
+                    /* Invalidate TLB for this VA in parent.
+                     *
+                     * KNOWN SMP LIMITATION (NM8): invlpg only flushes
+                     * the TLB on the current CPU. Other CPUs may still
+                     * have stale TLB entries with the old RW permission
+                     * for this page. A full smp_tlb_shootdown() would
+                     * be needed for correct SMP COW semantics. In the
+                     * current single-CPU or cooperative-SMP design,
+                     * this is acceptable because the COW fault handler
+                     * will safely resolve any write attempt.
+                     */
                     uint64_t va = ((uint64_t)i << 39) | ((uint64_t)j << 30) |
                                   ((uint64_t)k << 21) | ((uint64_t)l << 12);
                     invlpg(va);
@@ -655,6 +693,20 @@ void pf_handler_c(uint64_t error_code) {
             return;
         }
 
+        /*
+         * Validate that the fault address falls within the canonical
+         * user-space range (NM2 fix). Addresses outside this range
+         * (e.g., non-canonical or kernel-space addresses passed by
+         * a malicious/buggy user program) should not trigger lazy
+         * allocation.
+         */
+        if (cr2 > 0x00007FFFFFFFFFFFULL) {
+            log_printf(LOG_LEVEL_ERR, "Lazy alloc: address %p outside user range, sending SIGSEGV\n",
+                       (void *)cr2);
+            if (current) do_sys_kill(current->pid, SIGSEGV);
+            return;
+        }
+
         /* Allocate a zero-filled physical page */
         void *new_page = alloc_page();
         if (!new_page) {
@@ -740,8 +792,16 @@ void pf_handler_c(uint64_t error_code) {
         /* Copy content from old page to new page */
         memcpy(new_page, (void *)(uintptr_t)(cr2 & ~0xFFFULL), PAGE_SIZE);
 
-        /* Decrement old page ref_count */
-        page_ref_dec(phys_page);
+        /* Decrement old page ref_count and free if no longer referenced */
+        {
+            struct page *pg = page_of_phys(phys_page);
+            if (pg) {
+                uint32_t new_ref = __sync_sub_and_fetch(&pg->ref_count, 1);
+                if (new_ref == 0) {
+                    free_page((void *)(uintptr_t)phys_page);
+                }
+            }
+        }
 
         /* Update PTE: new physical page, RW, preserve USER/NX */
         uint64_t new_flags = (pte & (PTE_USER | PTE_NX)) | PTE_PRESENT | PTE_RW;
@@ -766,7 +826,12 @@ void pf_handler_c(uint64_t error_code) {
      * or panic if in pure kernel context (no current task).
      */
     if (present && !user) {
-        /* Verify the page is actually a user page by checking the PTE */
+        /* Verify the page is actually a user page by checking the PTE.
+         * Only the leaf PTE's USER bit is definitive (NM9 fix).
+         * Intermediate PTEs (PML4, PDPT, PD) may or may not have
+         * PTE_USER set depending on the mapping path, so we walk
+         * through them checking only PRESENT, then verify USER on
+         * the final leaf PTE. */
         uint64_t pml4_idx = (cr2 >> 39) & 0x1FF;
         uint64_t pdpt_idx = (cr2 >> 30) & 0x1FF;
         uint64_t pd_idx   = (cr2 >> 21) & 0x1FF;
@@ -774,32 +839,41 @@ void pf_handler_c(uint64_t error_code) {
 
         uint64_t cr3 = read_cr3();
         uint64_t *pml4 = phys_to_virt(cr3);
-        if ((pml4[pml4_idx] & PTE_PRESENT) && (pml4[pml4_idx] & PTE_USER)) {
+        if (pml4[pml4_idx] & PTE_PRESENT) {
             uint64_t *pdpt = phys_to_virt(pml4[pml4_idx] & PTE_ADDR_MASK);
-            if ((pdpt[pdpt_idx] & PTE_PRESENT) && (pdpt[pdpt_idx] & PTE_USER)) {
+            if (pdpt[pdpt_idx] & PTE_PRESENT) {
                 uint64_t *pd = phys_to_virt(pdpt[pdpt_idx] & PTE_ADDR_MASK);
-                if ((pd[pd_idx] & PTE_PRESENT) && (pd[pd_idx] & PTE_USER)) {
-                    if (!(pd[pd_idx] & PTE_PS)) {
+                if (pd[pd_idx] & PTE_PRESENT) {
+                    if (pd[pd_idx] & PTE_PS) {
+                        /* 2MB huge page: check USER on the PDE itself */
+                        if (pd[pd_idx] & PTE_USER) {
+                            goto smap_violation;
+                        }
+                    } else {
                         uint64_t *pt = phys_to_virt(pd[pd_idx] & PTE_ADDR_MASK);
                         if ((pt[pt_idx] & PTE_PRESENT) && (pt[pt_idx] & PTE_USER)) {
-                            /* SMAP violation confirmed: kernel accessed user page without STAC */
-                            log_printf(LOG_LEVEL_ERR,
-                                "SMAP violation: kernel accessed user page at CR2=%p (code=0x%x)\n",
-                                (void *)cr2, (unsigned int)error_code);
-                            if (current) {
-                                log_printf(LOG_LEVEL_ERR,
-                                    "SMAP violation in process %s (pid=%d), sending SIGSEGV\n",
-                                    current->name, current->pid);
-                                do_sys_kill(current->pid, SIGSEGV);
-                                return;
-                            }
-                            panic("SMAP violation in kernel context at CR2=%p\n", (void *)cr2);
+                            goto smap_violation;
                         }
                     }
                 }
             }
         }
         /* Fall through to unhandled if not a SMAP violation */
+        goto unhandled;
+
+smap_violation:
+        /* SMAP violation confirmed: kernel accessed user page without STAC */
+        log_printf(LOG_LEVEL_ERR,
+            "SMAP violation: kernel accessed user page at CR2=%p (code=0x%x)\n",
+            (void *)cr2, (unsigned int)error_code);
+        if (current) {
+            log_printf(LOG_LEVEL_ERR,
+                "SMAP violation in process %s (pid=%d), sending SIGSEGV\n",
+                current->name, current->pid);
+            do_sys_kill(current->pid, SIGSEGV);
+            return;
+        }
+        panic("SMAP violation in kernel context at CR2=%p\n", (void *)cr2);
     }
 
 unhandled:

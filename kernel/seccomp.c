@@ -53,7 +53,11 @@ int seccomp_set_filter(struct task_struct *task, struct seccomp_filter *filter) 
         return 0;
     }
 
-    /* Allocate and copy the new filter */
+    /* Allocate and copy the new filter.
+     * NOTE: The filter pointer is assumed to already reference kernel memory
+     * (validated and copied by the syscall layer via copy_from_user before
+     * this function is called).  copy_from_user handles page faults in the
+     * user page, so the data is safe against concurrent user-page unmapping. */
     struct seccomp_filter *new_filter = kmalloc(sizeof(struct seccomp_filter));
     if (!new_filter) {
         spin_unlock((spinlock_t*)&task->seccomp_lock);
@@ -107,6 +111,10 @@ int seccomp_check(struct task_struct *task, int syscall_num) {
      * syscall_mask[1] covers syscalls 64..127
      * syscall_mask[2] covers syscalls 128..191
      * syscall_mask[3] covers syscalls 192..255
+     *
+     * KNOWN LIMITATION: The current bitmap-based filter only checks the
+     * syscall number, not the syscall arguments.  A full seccomp BPF
+     * implementation would allow filtering based on argument values.
      */
     int word_idx = syscall_num / 64;
     int bit_idx  = syscall_num % 64;

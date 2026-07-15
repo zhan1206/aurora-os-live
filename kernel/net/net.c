@@ -322,6 +322,7 @@ int ip_send(const uint8_t dst_ip[4], uint8_t protocol,
     }
 
     int total = (int)(sizeof(struct ipv4_hdr) + len);
+    if (total > 65535) total = 65535;
     uint8_t *packet = (uint8_t *)kmalloc((size_t)total);
     if (!packet) return -1;
 

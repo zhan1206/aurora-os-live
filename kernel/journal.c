@@ -135,11 +135,11 @@ static void advance_head(uint64_t n) {
     }
     if (g_journal.head >= g_journal.journal_blocks) {
         g_journal.head -= g_journal.journal_blocks;
-        /* Only decrement tail if it won't underflow */
+        /* Only decrement tail if it also wrapped past the end of the
+         * circular buffer.  Otherwise tail stays at its current position
+         * (the data between tail and the old end of the buffer is still valid). */
         if (g_journal.tail >= g_journal.journal_blocks) {
             g_journal.tail -= g_journal.journal_blocks;
-        } else {
-            g_journal.tail = 0;
         }
     }
     write_jsb();

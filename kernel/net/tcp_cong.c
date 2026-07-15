@@ -120,6 +120,9 @@ static struct tcp_cong_data *tcp_cong_find_slot(int sock_id) {
  * RTT Estimation (Karn's algorithm)
  * ================================================================ */
 static void tcp_cong_update_rtt(struct tcp_cong_data *cd, uint32_t measured_rtt) {
+    if (measured_rtt == 0) {
+        return;  /* RTT=0 is invalid, skip update */
+    }
     if (cd->rtt == 0) {
         /* First RTT measurement */
         cd->rtt = measured_rtt;
@@ -164,7 +167,9 @@ void tcp_cong_on_ack(int sock, uint32_t ack_seq, int dup_ack_count) {
     if (state == TCP_CONG_SLOW_START) {
         /* Slow Start: Each ACK increases cwnd by MSS */
         if (cd->cwnd < cd->ssthresh) {
-            cd->cwnd += TCP_MSS;
+            if (cd->cwnd <= UINT32_MAX - TCP_MSS) {
+                cd->cwnd += TCP_MSS;
+            }
             if (cd->cwnd > cd->ssthresh) {
                 cd->cwnd = cd->ssthresh;
             }

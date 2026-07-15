@@ -454,6 +454,10 @@ void ipv6_handle_packet(struct net_device *netdev,
     if (ip6->next_header == IPV6_PROTO_ICMPV6) {
         if (payload_len < 4) return;
 
+        /* NOTE: Known limitation - IPv6 extension headers are not
+         * parsed. A full implementation would walk the extension
+         * header chain (Hop-by-Hop, Routing, Fragment, etc.) to
+         * find the actual upper-layer protocol header. */
         uint8_t icmp_type = payload[0];
 
         switch (icmp_type) {

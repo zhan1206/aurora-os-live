@@ -315,8 +315,17 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable
                 &alloc_addr
             );
             if (EFI_ERROR(status)) {
-                /* Try AllocateAnyPages as fallback.
-                 * This will break identity mapping, but try anyway. */
+                /*
+                 * NOTE: AllocateAddress failed — the requested physical
+                 * address is likely already reserved by UEFI firmware.
+                 * Fall back to AllocateMaxAddress, but this will break
+                 * identity mapping because the kernel expects to be loaded
+                 * at its link-time address.  The kernel's entry.S must
+                 * handle this case by relocating itself or by using the
+                 * physical address passed via the boot info structure.
+                 * TODO: Pass the actual load address to the kernel so it
+                 * can adjust its page tables accordingly.
+                 */
                 alloc_addr = 0x100000;  /* prefer 1MB */
                 status = BS->AllocatePages(
                     AllocateMaxAddress,

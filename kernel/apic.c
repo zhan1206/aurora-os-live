@@ -206,6 +206,15 @@ void lapic_send_ipi(int lapic_id, int vector) {
         asm volatile ("pause" ::: "memory");
     }
 
+    /*
+     * NOTE: The ICR high/low write sequence is NOT atomic.  Between
+     * setting ICR_HI and writing ICR_LO, the destination field could
+     * theoretically be clobbered by another CPU writing to the same
+     * local APIC.  This is acceptable on single-socket / single-APIC
+     * systems where only one CPU's LAPIC is accessed at a time.
+     * Multi-socket systems with x2APIC should use the 64-bit MSR write
+     * (wrmsr 0x830) which is atomic.
+     */
     /* Set destination in ICR high */
     lapic_write(LAPIC_ICR_HI, (uint32_t)lapic_id << 24);
 

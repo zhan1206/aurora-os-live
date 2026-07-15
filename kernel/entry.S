@@ -178,6 +178,7 @@ gdt64_desc:
 .align 16
 stack_bottom:
     .space 32768
+    .global stack_top
 stack_top:
 
 .global bss_start, bss_end

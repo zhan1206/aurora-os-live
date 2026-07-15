@@ -766,9 +766,12 @@ int module_unload(const char *name) {
                 /* Free the dep name if it exists */
                 if (m->dep_names && m->dep_names[i]) {
                     kfree(m->dep_names[i]);
-                    for (int j = i; j < m->num_deps; j++) {
+                    /* Shift remaining dep_names: stop at num_deps-1 to
+                     * avoid reading dep_names[j+1] past the array. */
+                    for (int j = i; j < m->num_deps - 1; j++) {
                         m->dep_names[j] = m->dep_names[j + 1];
                     }
+                    m->dep_names[m->num_deps - 1] = NULL;
                 }
                 break;
             }

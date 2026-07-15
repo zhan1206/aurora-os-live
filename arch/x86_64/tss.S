@@ -59,6 +59,8 @@ ist3_stack_top:
     .global tss_init
     .type tss_init, @function
 
+    .extern stack_top
+
 /*
  * tss_init: Initialize the TSS with IST stack pointers.
  *
@@ -66,6 +68,11 @@ ist3_stack_top:
  * The TSS descriptor in GDT must already be loaded.
  */
 tss_init:
+    /* Set RSP0 (kernel stack for ring 0 transitions).
+     * stack_top is the boot kernel stack defined in entry.S. */
+    lea stack_top(%rip), %rax
+    mov %rax, tss + 0x04
+
     /* Set IST1 (Double Fault stack) */
     lea ist1_stack_top(%rip), %rax
     mov %rax, tss + 0x24

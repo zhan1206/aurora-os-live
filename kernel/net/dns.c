@@ -149,6 +149,7 @@ int dns_query(const char *hostname, uint8_t ip_out[4]) {
         if (ntohs(rx_hdr->qdcount) != 1) continue;
 
         uint16_t ancount = ntohs(rx_hdr->ancount);
+        if (ancount > 32) ancount = 32;
         if (ancount == 0) {
             log_printf(LOG_LEVEL_ERR, "dns: no answer for %s\n", hostname);
             return -1;
@@ -175,8 +176,10 @@ int dns_query(const char *hostname, uint8_t ip_out[4]) {
                 pos += 2;
             } else {
                 while (pos < rx_len && rx_buf[pos] != 0) {
+                    if (pos + 1 + rx_buf[pos] > rx_len) break;
                     pos += 1 + rx_buf[pos];
                 }
+                if (pos >= rx_len) break;
                 pos += 1;
             }
 

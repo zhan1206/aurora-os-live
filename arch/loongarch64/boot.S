@@ -32,8 +32,12 @@ _start:
     csrrd $t0, 0x0              /* Read CRMD */
     /* Set DA=1 (direct mapping), PG=0 (no paging) */
     ori $t0, $t0, (1 << 1)
-    /* Clear IE (interrupt enable) */
-    andi $t0, $t0, ~(1 << 2)
+    /* Clear IE (interrupt enable).
+     * ~(1<<2) = 0xFFFFFFFFFFFFFFFB which exceeds the 12-bit immediate
+     * field of andi.  Use a two-step approach: load the mask into a
+     * register first, then AND. */
+    li.w $t1, ~(1 << 2)
+    and $t0, $t0, $t1
     csrwr $t0, 0x0
 
     /* Jump to kernel_main */
