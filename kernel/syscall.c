@@ -18,6 +18,7 @@
 #include "capability.h"
 #include "perf.h"
 #include "seccomp.h"
+#include "aslr.h"
 #include "rtc.h"
 #include <stdint.h>
 #include <stddef.h>
@@ -29,6 +30,29 @@ struct trapframe *current_tf = NULL;
 /* ================================================================
  * I/O syscalls
  * ================================================================ */
+
+/*
+ * fd_validate: Basic fd access validation with capability awareness.
+ *
+ * FIXED (v4.1.3): Added capability-aware fd access checking.
+ * In addition to bounds checking, this validates that the fd entry
+ * is a valid file pointer (not a cap_entry wrapper or stale slot).
+ * For cap_entry-based fds, the capability flags are checked via
+ * fd_check_cap().
+ */
+static int fd_validate(int fd, uint32_t required_cap) {
+    if (fd < 0 || fd >= MAX_FDS) return -EBADF;
+    if (current->fd_table[fd] == (uintptr_t)-1) return -EBADF;
+
+    /* Check if this is a capability entry (starts with CAP_ENTRY_MAGIC) */
+    struct cap_entry *entry = (struct cap_entry *)current->fd_table[fd];
+    if (entry->magic == CAP_ENTRY_MAGIC) {
+        if (required_cap && (entry->caps & required_cap) != required_cap)
+            return -EACCES;
+    }
+    /* Raw file pointers have no capability restrictions */
+    return 0;
+}
 
 /* Simple stat structure for fstat syscall */
 struct kstat {
@@ -45,7 +69,8 @@ struct kstat {
 
 static long sys_read(int fd, void *buf, size_t count) {
     if (!buf || count == 0) return 0;
-    if (fd < 0 || fd >= MAX_FDS) { current->t_errno = EBADF; return -1; }
+    int cap_ret = fd_validate(fd, 0);
+    if (cap_ret < 0) { current->t_errno = -cap_ret; return -1; }
     if (!user_addr_range_ok(buf, count)) { current->t_errno = EFAULT; return -1; }
 
     /* fd 0 (stdin): read from console line buffer */
@@ -73,7 +98,8 @@ static long sys_read(int fd, void *buf, size_t count) {
 
 static long sys_write(int fd, const void *buf, size_t count) {
     if (!buf || count == 0) return 0;
-    if (fd < 0 || fd >= MAX_FDS) { current->t_errno = EBADF; return -1; }
+    int cap_ret = fd_validate(fd, 0);
+    if (cap_ret < 0) { current->t_errno = -cap_ret; return -1; }
     if (!user_addr_range_ok(buf, count)) { current->t_errno = EFAULT; return -1; }
 
     /* fd 1/2 (stdout/stderr): batch output to VGA + serial */
@@ -313,12 +339,25 @@ static long sys_mmap(void *addr, size_t length, int prot, int flags,
 
     /* Align length to page size */
     size_t num_pages = (length + PAGE_SIZE - 1) / PAGE_SIZE;
-    uint64_t map_va = 0x60000000ULL; /* Fixed mapping region for now */
+
+    /*
+     * FIXED (v4.1.3): Use ASLR-randomized mmap base instead of hardcoded
+     * 0x60000000.  Each call advances mmap_base by the allocation size to
+     * prevent overlapping mappings.  The initial base is randomized once
+     * per process via aslr_randomize_mmap().
+     *
+     * Previously, mmap always returned 0x60000000, making ASLR ineffective
+     * for anonymous mappings and allowing predictable address layouts.
+     */
+    if (current->mmap_base == 0) {
+        current->mmap_base = aslr_randomize_mmap();
+        if (current->mmap_base == 0) current->mmap_base = ASLR_MMAP_BASE;
+    }
+    uint64_t map_va = current->mmap_base;
+    current->mmap_base += num_pages * PAGE_SIZE;
 
     /* Reject mappings that would overlap kernel space.
-     * User space ends at 0x00007FFFFFFFFFFF; kernel space starts above that.
-     * The fixed mapping region (0x60000000) is well within user space, but
-     * we guard against length overflow or future changes to the base. */
+     * User space ends at 0x00007FFFFFFFFFFF; kernel space starts above that. */
     if (map_va + length < map_va || map_va + length > 0x00007FFFFFFFFFFFULL) {
         current->t_errno = ENOMEM; return -1;
     }

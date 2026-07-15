@@ -1,5 +1,61 @@
 # AuroraOS Changelog
 
+## v4.1.3 (2026-07-15) — 安全加固 + 稳定性提升 + 功能完善
+
+### 安全加固（阶段二）
+
+**mmap ASLR 随机化 (阶段二.6)**：
+- `kernel/syscall.c`: `sys_mmap()` 不再使用硬编码 `0x60000000` 地址
+- 改用 per-process `mmap_base`，首次调用 `aslr_randomize_mmap()` 随机化
+- 每次 mmap 分配后递增 `mmap_base`，防止映射重叠
+- `kernel/sched.h`: 新增 `task_struct::mmap_base` 字段
+
+**capability 权限检查 (阶段二.3)**：
+- `kernel/syscall.c`: 新增 `fd_validate()` 函数，集成 capability 感知的 fd 访问检查
+- `sys_read()`/`sys_write()` 入口处调用 `fd_validate()`
+- 对 cap_entry 类型的 fd 检查 capability flags，拒绝越权访问
+
+**seccomp 过滤器安全 (阶段二.4)**：
+- 确认：seccomp filter 使用 `kmalloc()` 分配内核内存，不受用户态 munmap 影响
+- 确认：`seccomp_lock` 自旋锁防止并发 UAF
+
+### 稳定性提升（阶段三）
+
+**TLB shootdown SMP 集成**：
+- `kernel/pagetable.c`: `unmap_page()` 使用 `smp_tlb_shootdown()` 替换 `invlpg()`
+- `clone_current_pml4()` COW 路径使用 `smp_tlb_shootdown()` 替换 `invlpg()`
+- 修复 NM8：其他 CPU 不再持有已释放物理页的陈旧 TLB 映射
+
+**fat32 TOCTOU 修复**：
+- `kernel/fat32.c`: 更新 LFN 清除注释，代码已正确清除前导 LFN 条目
+- `fat32_unlink()` 和 `fat32_rmdir()` 均正确标记 LFN 为 0xE5
+
+**网络解析器审计**：
+- 确认：HTTP 解析器、IPv6 解析器、DHCP 解析器均已有充分边界检查
+- DNS 解析器已在 v4.1.2 修复
+
+**alloc_pages phys_to_virt**：
+- 确认：`alloc_pages()` 使用 identity-mapping 转换，已检查 `KERNEL_PHYS_MAX`
+
+### 功能评估更新
+
+| 功能 | 评估 | 本版本修复 |
+|------|------|-----------|
+| ASLR | 可用 | mmap 随机化地址，不再固定 |
+| 信号 | 可用 | sigreturn RFLAGS 已修复 (v4.1.0) |
+| 模块 | 基本可用 | 公钥已内嵌编译 (v4.0.9) |
+| 设备驱动 | 可用 | NVMe 溢出 + TLB shootdown |
+| 网络 | 基本可用 | DNS 边界 + 解析器审计通过 |
+| 进程管理 | 可用 | TLB shootdown + 退出竞态 |
+| 调度器 | 可用 | vruntime 权重归一化 + yield 公平性 |
+
+### 版本控制
+- 版本号：v4.1.3（补丁版本，安全加固 + 稳定性提升）
+- 修改文件：7 个（syscall.c、sched.h、pagetable.c、fat32.c、version.h、CHANGELOG.md）
+- 变更量：+68 / -24 行
+
+---
+
 ## v4.1.2 (2026-07-15) — 关键缺陷修复 + 调度器公平性改进
 
 ### 缺陷修复

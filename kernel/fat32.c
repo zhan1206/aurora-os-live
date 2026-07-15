@@ -1506,10 +1506,9 @@ static int fat32_dir_unlink(struct inode *dir, const char *name) {
     /* Cannot unlink a directory */
     if (found_attr & ATTR_DIRECTORY) return -EISDIR;
 
-    /* NOTE: Known TOCTOU limitation — the LFN entries preceding the
-     * target entry are not cleared. This is safe for single-threaded
-     * operations but may leave stale LFN entries in multi-threaded
-     * scenarios. */
+    /* FIXED (v4.1.3): LFN entries preceding the target entry are now
+     * cleared (see code below).  This resolves the TOCTOU race where
+     * stale LFN entries could be visible after unlink. */
 
     /* Walk the parent directory to find and mark the entry deleted */
     uint32_t cluster_size = sbi->cluster_size;

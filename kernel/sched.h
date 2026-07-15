@@ -100,6 +100,7 @@ struct task_struct {
 
     /* --- Memory management --- */
     uint64_t  brk;             /* program break (heap end) for this process */
+    uint64_t  mmap_base;       /* next mmap allocation address (ASLR-randomized) */
 
     /* --- Environment variables --- */
     char      env_keys[16][64];   /* environment variable keys */

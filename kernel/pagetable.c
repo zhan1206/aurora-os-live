@@ -27,6 +27,7 @@
 #include "include/log.h"
 #include "include/assert.h"
 #include "mem.h"
+#include "smp.h"
 #include "signal.h"
 #include "sched.h"
 #include "perf.h"
@@ -415,9 +416,14 @@ void unmap_page(uint64_t pml4_phys, uint64_t vaddr) {
     uint64_t *pt = phys_to_virt(pd[pd_idx] & PTE_ADDR_MASK);
     if (!(pt[pt_idx] & PTE_PRESENT)) return;
 
-    /* Clear the PTE and flush TLB */
+    /* Clear the PTE and flush TLB on all CPUs.
+     *
+     * FIXED (v4.1.3): Replaced local invlpg() with smp_tlb_shootdown()
+     * to ensure all CPUs invalidate the stale TLB entry.  Previously,
+     * other CPUs could continue using the old mapping after unmap,
+     * leading to use-after-free or access to freed physical pages. */
     pt[pt_idx] = 0;
-    invlpg(vaddr);
+    smp_tlb_shootdown(vaddr);
 }
 
 /* ================================================================
@@ -558,18 +564,13 @@ uint64_t clone_current_pml4(void) {
 
                     /* Invalidate TLB for this VA in parent.
                      *
-                     * KNOWN SMP LIMITATION (NM8): invlpg only flushes
-                     * the TLB on the current CPU. Other CPUs may still
-                     * have stale TLB entries with the old RW permission
-                     * for this page. A full smp_tlb_shootdown() would
-                     * be needed for correct SMP COW semantics. In the
-                     * current single-CPU or cooperative-SMP design,
-                     * this is acceptable because the COW fault handler
-                     * will safely resolve any write attempt.
-                     */
+                     * FIXED (v4.1.3): Use smp_tlb_shootdown() instead of
+                     * local invlpg() for correct SMP COW semantics.  Other
+                     * CPUs may have the old RW mapping cached and could
+                     * write to the page before the COW fault handler runs. */
                     uint64_t va = ((uint64_t)i << 39) | ((uint64_t)j << 30) |
                                   ((uint64_t)k << 21) | ((uint64_t)l << 12);
-                    invlpg(va);
+                    smp_tlb_shootdown(va);
                 }
             }
         }
