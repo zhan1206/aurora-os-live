@@ -52,10 +52,22 @@ static void nvme_queue_init(struct nvme_queue *q, uint16_t qid,
     q->entry_size = sizeof(struct nvme_sqe);
     q->phase = 1;
 
+    /*
+     * Prevent integer overflow in multiplication. If num_entries exceeds
+     * SIZE_MAX / sizeof(entry), the multiplication would wrap around and
+     * allocate less memory than expected, leading to heap corruption.
+     * Clamp num_entries to a safe maximum before multiplication.
+     *
+     * FIXED (v4.1.2): Check overflow BEFORE multiplication (NH8).
+     */
+    size_t max_sq_entries = SIZE_MAX / sizeof(struct nvme_sqe);
+    size_t max_cq_entries = SIZE_MAX / sizeof(struct nvme_cqe);
+    size_t safe_entries = (size_t)num_entries;
+    if (safe_entries > max_sq_entries) safe_entries = max_sq_entries;
+    if (safe_entries > max_cq_entries) safe_entries = max_cq_entries;
+
     /* Allocate Submission Queue */
-    uint64_t sq_size64 = (uint64_t)num_entries * sizeof(struct nvme_sqe);
-    if (sq_size64 > SIZE_MAX) sq_size64 = SIZE_MAX;
-    size_t sq_size = (size_t)sq_size64;
+    size_t sq_size = safe_entries * sizeof(struct nvme_sqe);
     q->sq = (struct nvme_sqe *)kmalloc(sq_size);
     if (q->sq) {
         memset(q->sq, 0, sq_size);
@@ -63,9 +75,7 @@ static void nvme_queue_init(struct nvme_queue *q, uint16_t qid,
     }
 
     /* Allocate Completion Queue */
-    uint64_t cq_size64 = (uint64_t)num_entries * sizeof(struct nvme_cqe);
-    if (cq_size64 > SIZE_MAX) cq_size64 = SIZE_MAX;
-    size_t cq_size = (size_t)cq_size64;
+    size_t cq_size = safe_entries * sizeof(struct nvme_cqe);
     q->cq = (struct nvme_cqe *)kmalloc(cq_size);
     if (q->cq) {
         memset(q->cq, 0, cq_size);

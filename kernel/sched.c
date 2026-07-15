@@ -507,23 +507,30 @@ void schedule(void) {
 
     /*
      * VRFair vruntime update:
-     * - If the task was preempted (still TASK_READY), add its time_slice
+     * - If the task was preempted (still TASK_RUNNING), add its time_slice
      *   to vruntime to account for the CPU time it consumed.
      * - If the task blocked (TASK_BLOCKED), don't penalize it — keep
      *   vruntime low so it gets scheduled quickly when it wakes up.
      * - Zombie tasks don't get vruntime updates.
+     *
+     * FIXED (v4.1.2): vruntime is now weight-normalized (NM3).
+     *   Higher-priority tasks get LESS vruntime per tick consumed,
+     *   lower-priority tasks get MORE, ensuring true CFS fairness.
+     *   Formula: vruntime += consumed * NICE_0_WEIGHT / task_weight
+     *   where task_weight = priority + 1 (1..256).
      */
     int prev_state = prev->state;
     if (prev_state == TASK_RUNNING) {
         prev->state = TASK_READY;
-        /* Task was preempted or yielded: add actual consumed ticks to vruntime.
-         * time_slice may have been recharged in schedule_tick(), so compute
-         * the actual consumed ticks as (full_slice - remaining). */
+        /* Task was preempted or yielded: add actual consumed ticks to vruntime */
         uint64_t full_slice = (uint64_t)(BASE_SLICE * (256 - prev->priority) / 256);
         if (full_slice < 1) full_slice = 1;
         int64_t consumed = (int64_t)full_slice - (int64_t)prev->time_slice;
-        if (consumed <= 0) consumed = (int64_t)full_slice;
-        prev->vruntime += (uint64_t)consumed;
+        if (consumed <= 0) consumed = 1;  /* at least 1 tick */
+        /* Weight normalization: high priority = smaller vruntime increment */
+        uint64_t weight = (uint64_t)(prev->priority + 1);
+        uint64_t nice0_weight = 128;
+        prev->vruntime += ((uint64_t)consumed * nice0_weight) / weight;
         perf_inc(PERF_VRUNTIME_UPDATES);
     }
     /* If prev->state was TASK_BLOCKED or TASK_ZOMBIE, leave vruntime unchanged */
@@ -575,12 +582,24 @@ void schedule(void) {
 
 void yield(void) {
     if (current) {
-        /* Update vruntime for actual consumed ticks before yielding */
+        /*
+         * Update vruntime for actual consumed ticks before yielding.
+         *
+         * FIXED (v4.1.2): yield() no longer adds full_slice when the task
+         * hasn't consumed any ticks.  Previously, a task that yielded
+         * immediately after being scheduled would get charged the full
+         * time slice, causing unfair starvation (NM4).
+         *
+         * Now we add only the actual consumed ticks, weight-normalized
+         * the same way as schedule().
+         */
         uint64_t full_slice = (uint64_t)(BASE_SLICE * (256 - current->priority) / 256);
         if (full_slice < 1) full_slice = 1;
         int64_t consumed = (int64_t)full_slice - (int64_t)current->time_slice;
-        if (consumed <= 0) consumed = (int64_t)full_slice;
-        current->vruntime += (uint64_t)consumed;
+        if (consumed <= 0) consumed = 1;  /* minimum 1 tick penalty */
+        uint64_t weight = (uint64_t)(current->priority + 1);
+        uint64_t nice0_weight = 128;
+        current->vruntime += ((uint64_t)consumed * nice0_weight) / weight;
         current->state = TASK_READY;
     }
     schedule();

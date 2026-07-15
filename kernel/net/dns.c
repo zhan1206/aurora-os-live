@@ -168,7 +168,14 @@ int dns_query(const char *hostname, uint8_t ip_out[4]) {
         pos += 1;  /* Skip terminating zero */
         pos += 4;  /* Skip QTYPE + QCLASS */
 
-        /* Parse answer section for A record */
+        /*
+         * Parse answer section for A record.
+         *
+         * FIXED (v4.1.2): Added bounds check after pos += rdlen to prevent
+         * out-of-bounds read on the next iteration.  An attacker-controlled
+         * rdlen value could cause pos to exceed rx_len, leading to a buffer
+         * over-read (NH10).
+         */
         int a;
         for (a = 0; a < (int)ancount && pos + 10 <= rx_len; a++) {
             /* Skip name (might be compressed) */
@@ -212,6 +219,8 @@ int dns_query(const char *hostname, uint8_t ip_out[4]) {
                     return 0;
                 }
             }
+            /* Advance past the RDATA, but validate against rx_len */
+            if ((uint32_t)pos + (uint32_t)rdlen > (uint32_t)rx_len) break;
             pos += rdlen;
         }
     }

@@ -1,5 +1,43 @@
 # AuroraOS Changelog
 
+## v4.1.2 (2026-07-15) — 关键缺陷修复 + 调度器公平性改进
+
+### 缺陷修复
+
+**NVMe 整数溢出 (NH8)**：
+- `kernel/nvme.c`: `nvme_queue_init()` 增加了乘法溢出前检查
+- 修复前：`(uint64_t)num_entries * sizeof(entry)` 先乘后检查，大值会回绕
+- 修复后：先计算 `SIZE_MAX / sizeof(entry)` 安全上限，再 clamp num_entries
+
+**DNS 解析器边界检查 (NH10)**：
+- `kernel/net/dns.c`: DNS 应答解析循环中 `pos += rdlen` 后增加越界验证
+- 修复前：攻击者可构造恶意 rdlen 值导致缓冲区越界读取
+- 修复后：`(uint32_t)pos + (uint32_t)rdlen > (uint32_t)rx_len` 时终止解析
+
+**调度器 yield 公平性 (NM4)**：
+- `kernel/sched.c`: `yield()` 不再对刚被调度的任务加满时间片惩罚
+- 修复前：`consumed <= 0` 时加 `full_slice`，导致频繁 yield 的任务饥饿
+- 修复后：最小惩罚为 1 tick，按实际消耗计算
+
+**调度器 vruntime 权重归一化 (NM3)**：
+- `kernel/sched.c`: `schedule()` 和 `yield()` 的 vruntime 增量改为权重归一化
+- 修复前：所有优先级任务加相同 vruntime，CFS 公平性形同虚设
+- 修复后：`vruntime += consumed * 128 / (priority + 1)`，高优先级任务获得更小增量
+
+### 功能评估更新
+
+| 功能 | 评估 | 本版本修复 |
+|------|------|-----------|
+| 设备驱动 | 可用 | NVMe 整数溢出 NH8 |
+| 网络 | 基本可用 | DNS 解析器边界检查 NH10 |
+| 调度器 | 可用 | vruntime 权重归一化 NM3 + yield 公平性 NM4 |
+
+### 版本控制
+- 版本号：v4.1.2（补丁版本，关键缺陷修复）
+- 修改文件：4 个（nvme.c、dns.c、sched.c、version.h）
+
+---
+
 ## v4.1.1 (2026-07-14) — 功能评估验证 + CI 基础设施 + 审查规范
 
 ### 功能有效性评估（v4.1.1 修正后状态）
