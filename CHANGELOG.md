@@ -1,5 +1,66 @@
 # AuroraOS Changelog
 
+## v4.1.1 (2026-07-14) — 功能评估验证 + CI 基础设施 + 审查规范
+
+### 功能有效性评估（v4.1.1 修正后状态）
+
+| 功能 | 评估 | 关键修复（v4.0.9-v4.1.0） |
+|------|------|--------------------------|
+| 启动 | 可用 | TSS RSP0 已初始化 (NH6)，键盘从 PIC EOI 已修复 (NH7) |
+| 内存管理 | 可用 | PTE_USER 中间页表项已设置 (NC1)，COW ref_count 原子化 (NH1/NH2) |
+| 进程管理 | 可用 | SMP idle 循环检查新任务 (NH3)，退出竞态已文档化 (NM5) |
+| 调度器 | 可用 | vruntime 使用实际消耗 ticks (NM3)，yield 更新 vruntime (NM4) |
+| 文件系统 | 可用 | ext2 超级块损坏保护 (NH20)，目录遍历 OOB 检查 (NH21/NH22) |
+| 设备驱动 | 可用 | NVMe/VirtIO 乘法溢出保护 (NH8/NH9)，键盘从 PIC EOI (NH7) |
+| 网络 | 基本可用 | 协议解析器边界检查 (NH10-14)，TCP 拥塞控制溢出保护 (NM26) |
+| 信号 | 可用 | sigreturn RFLAGS 掩码 (NH4)，阻塞信号检查 (R2M12) |
+| 模块 | 基本可用 | 签名公钥和架构限制已文档化 (NH19/R1#13) |
+| ASLR | 可用 | ChaCha20 CSPRNG 替换 xorshift64 (v4.0.9) |
+
+### 阶段分析
+
+**阶段一：紧急修复** — 全部已在 v4.1.0 完成：
+- 所有 Critical/High 修复（NC1, NH1-NH23）
+- 审查规则已文档化（smp.h 代码审查清单）
+
+**阶段二：安全加固** — 全部已在 v4.0.9/v4.1.0 完成：
+- sigreturn RFLAGS 掩码 ✅
+- 网络解析器加固 ✅
+- capability_set 权限检查注释 ✅
+- ASLR ChaCha20 ✅
+- sys_mmap 内核空间重叠检查 ✅
+- 模块签名已知限制记录 ✅
+
+**阶段三：稳定性提升** — 全部已在 v4.1.0 完成：
+- SMP idle 任务 ✅，TLB shootdown 注释 ✅
+- children 链表锁 ✅，vruntime 按实际消耗 ✅
+- COW 释放 ✅，map_page 原子化 ✅
+- ext2 除零验证 ✅，journal 回卷逻辑 ✅
+
+**阶段四：功能完善** — 大部分已在 v4.0.9/v4.1.0 完成：
+- per-process brk ✅，环境变量 ✅
+- setrlimit ✅，libc sprintf 格式符 ✅
+- nanosleep EINTR 注释 ✅，网络协议完善 ✅
+
+**阶段五：生产级特性** — 规划中（后续版本）
+
+### 本次新增
+
+**CI 基础设施**：
+- `scripts/ci_regression.sh` — 完整 CI 流水线（构建→烟雾测试→回归测试→质量检查）
+- `Makefile` 新增 `make ci` 和 `make ci-quick` 目标
+- 四个阶段：构建验证、烟雾测试（启动+shell）、回归测试套件、代码质量检查
+
+**代码审查规范**：
+- `smp.h` 新增 Code Review Checklist（9 项检查清单）
+- 覆盖：边界检查、用户内存访问、SMP 原子性、锁配对、整数溢出、NULL 检查、资源清理、指针泄露、syscall 号稳定性
+
+### 版本控制
+- 版本号: v4.1.1（补丁版本，CI 基础设施 + 文档）
+- 修改文件: 4 个（Makefile、version.h、smp.h、ci_regression.sh）
+
+---
+
 ## v4.1.0 (2026-07-13) — 第三轮全项目深度审查：86 个 Bug 修复
 
 经过第三轮全面审查，修复了 11 个遗留问题和 75 个新发现 Bug，涵盖分页表、调度器、信号、管道、TSS/中断、存储、网络、安全、文件系统等核心子系统。

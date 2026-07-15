@@ -217,6 +217,16 @@ regression-test: iso
 	@echo "  REGRESSION running regression test suite..."
 	@python3 scripts/regression_test.py || python scripts/regression_test.py
 
+# CI pipeline: full build + smoke + regression + quality check
+ci: iso
+	@echo "  CI     running CI pipeline..."
+	@bash scripts/ci_regression.sh
+
+# CI quick: build + smoke only (fast pre-commit check)
+ci-quick: iso
+	@echo "  CI     running quick CI check..."
+	@bash scripts/ci_regression.sh --quick
+
 # ================================================================
 # Kernel modules
 # ================================================================

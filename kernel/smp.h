@@ -115,6 +115,17 @@ void smp_tlb_shootdown(uint64_t vaddr);
  *   - Syscall numbers are defined in kernel/syscall.h.
  *   - Once a syscall number is assigned, do NOT reuse or renumber.
  *   - New syscalls should be appended to the end of the enum.
+ *
+ * Code Review Checklist (v4.1.1):
+ *   [ ] All user input is bounds-checked (buffer sizes, indices, lengths)
+ *   [ ] All user memory access uses copy_from_user/copy_to_user
+ *   [ ] All SMP paths use atomic operations or spinlocks
+ *   [ ] All spin_lock calls have matching spin_unlock on every path
+ *   [ ] All integer arithmetic involving user-controlled values has overflow checks
+ *   [ ] All kmalloc/kzalloc results are checked for NULL
+ *   [ ] All error paths free allocated resources (goto cleanup pattern)
+ *   [ ] No kernel pointer addresses leaked in log messages
+ *   [ ] New syscall numbers appended to end of enum (never reused)
  * ================================================================ */
 
 typedef struct spinlock {
