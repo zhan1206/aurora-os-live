@@ -23,22 +23,19 @@ body {
     color: var(--text);
     font-family: "Inter", "Segoe UI", system-ui, sans-serif;
     min-height: 100vh;
-    overflow-x: hidden;
 }
-
-/* Hero */
 .hero {
-    padding: 16px 20px;
+    padding: 14px 20px;
     display: flex;
     align-items: center;
     justify-content: space-between;
     border-bottom: 1px solid var(--border);
     background: var(--surface);
     flex-wrap: wrap;
-    gap: 10px;
+    gap: 8px;
 }
 .hero h1 {
-    font-size: 1.25rem;
+    font-size: 1.2rem;
     font-weight: 700;
     background: linear-gradient(135deg, var(--accent-glow), #6366f1);
     -webkit-background-clip: text;
@@ -46,151 +43,110 @@ body {
     background-clip: text;
 }
 .hero .badge {
-    font-size: 0.75rem;
+    font-size: 0.7rem;
     background: var(--accent);
     color: #fff;
-    padding: 2px 10px;
-    border-radius: 20px;
+    padding: 2px 8px;
+    border-radius: 12px;
     font-weight: 600;
 }
-.status-bar {
-    display: flex;
-    gap: 12px;
-    font-size: 0.78rem;
-    color: var(--muted);
-}
+.status-bar { display: flex; gap: 10px; font-size: 0.75rem; color: var(--muted); flex-wrap: wrap; }
 .status-bar span { display: flex; align-items: center; gap: 4px; }
-.status-dot {
-    width: 8px; height: 8px;
-    border-radius: 50%;
-    display: inline-block;
-}
-.status-dot.loading { background: var(--yellow); animation: pulse 1.5s infinite; }
-.status-dot.running { background: var(--green); }
-.status-dot.error  { background: var(--red); }
-@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
+.dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.dot.loading { background: var(--yellow); animation: pulse 1.2s infinite; }
+.dot.ok { background: var(--green); }
+.dot.err { background: var(--red); }
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
 
-/* Controls */
 .controls {
-    padding: 10px 20px;
+    padding: 8px 20px;
     display: flex;
-    gap: 8px;
+    gap: 6px;
     border-bottom: 1px solid var(--border);
     background: var(--surface);
     flex-wrap: wrap;
 }
 .controls button {
-    padding: 6px 16px;
+    padding: 6px 14px;
     border: 1px solid var(--border);
     border-radius: 6px;
     background: transparent;
     color: var(--text);
-    font-size: 0.8rem;
+    font-size: 0.78rem;
     cursor: pointer;
     transition: all 0.2s;
-    display: flex;
-    align-items: center;
-    gap: 6px;
 }
-.controls button:hover { border-color: var(--accent); color: var(--accent-glow); }
-.controls button:active { transform: scale(0.97); }
+.controls button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent-glow); }
+.controls button:disabled { opacity: 0.4; cursor: not-allowed; }
 .controls button.primary {
     background: var(--accent);
     border-color: var(--accent);
     color: #fff;
     font-weight: 600;
 }
-.controls button.primary:hover { background: #6d28d9; }
+.controls button.primary:hover:not(:disabled) { background: #6d28d9; }
 
-/* Screen Area */
-.screen-container {
-    margin: 12px 20px;
+.screen-box {
+    margin: 10px 20px;
     border: 2px solid var(--border);
     border-radius: 8px;
     overflow: hidden;
     background: #000;
     position: relative;
-    min-height: 200px;
+    min-height: 180px;
 }
-.screen-container canvas {
-    display: block;
-    width: 100%;
-    height: auto;
-    image-rendering: pixelated;
-}
-.screen-loading {
+.screen-box canvas { display: block; width: 100%; image-rendering: pixelated; }
+
+.overlay {
     position: absolute;
     inset: 0;
     display: flex;
     align-items: center;
     justify-content: center;
     flex-direction: column;
-    gap: 16px;
-    background: rgba(0,0,0,0.85);
-    z-index: 10;
+    gap: 12px;
+    background: rgba(0,0,0,0.88);
+    z-index: 20;
 }
-.screen-loading p {
-    color: var(--muted);
-    font-size: 0.9rem;
-}
-.loader-bar {
-    width: 200px;
+.overlay p { color: var(--muted); font-size: 0.85rem; text-align: center; max-width: 80%; }
+.progress {
+    width: 220px;
     height: 4px;
     background: var(--border);
     border-radius: 2px;
     overflow: hidden;
 }
-.loader-bar-fill {
+.progress-fill {
     height: 100%;
     background: var(--accent);
-    transition: width 0.3s;
     width: 0%;
+    transition: width 0.5s ease;
 }
 
-/* Info */
-.info-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-    gap: 12px;
-    padding: 0 20px 20px;
-}
-.info-card {
+.diag {
+    margin: 10px 20px 20px;
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: 8px;
-    padding: 14px;
-}
-.info-card h3 {
-    font-size: 0.7rem;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: var(--muted);
-    margin-bottom: 6px;
-}
-.info-card .val { font-size: 1.1rem; font-weight: 600; }
-.info-card .val.green { color: var(--green); }
-
-/* Console Output */
-.console-log {
-    margin: 0 20px 20px;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 14px;
-    max-height: 200px;
+    padding: 12px;
+    max-height: 240px;
     overflow-y: auto;
     font-family: "JetBrains Mono", "Cascadia Code", monospace;
-    font-size: 0.75rem;
+    font-size: 0.72rem;
     line-height: 1.5;
     color: var(--muted);
     white-space: pre-wrap;
+    word-break: break-all;
 }
+.diag .ok { color: var(--green); }
+.diag .err { color: var(--red); }
+.diag .warn { color: var(--yellow); }
 
 footer {
     text-align: center;
-    padding: 12px;
+    padding: 10px;
     color: var(--muted);
-    font-size: 0.7rem;
+    font-size: 0.68rem;
     border-top: 1px solid var(--border);
 }
 footer a { color: var(--accent-glow); text-decoration: none; }
@@ -199,218 +155,239 @@ footer a { color: var(--accent-glow); text-decoration: none; }
 <body>
 
 <div class="hero">
-    <div style="display:flex;align-items:center;gap:10px;">
+    <div style="display:flex;align-items:center;gap:8px;">
         <h1>AuroraOS</h1>
         <span class="badge">v4.0.5</span>
     </div>
     <div class="status-bar">
-        <span id="status-emu"><span class="status-dot loading"></span> 模拟器加载中</span>
-        <span id="status-os"><span class="status-dot loading"></span> OS 启动中</span>
+        <span id="s-sab"><span class="dot loading"></span> SharedArrayBuffer</span>
+        <span id="s-v86"><span class="dot loading"></span> v86</span>
+        <span id="s-os"><span class="dot loading"></span> OS</span>
     </div>
 </div>
 
 <div class="controls">
-    <button class="primary" id="btn-start" onclick="startAuroraOS()">▶ 启动 AuroraOS</button>
-    <button id="btn-reset" onclick="resetVM()" disabled>↻ 重启</button>
-    <button id="btn-send" onclick="sendCtrlC()">⌨ Ctrl+C</button>
-    <button id="btn-enter" onclick="sendEnter()">↵ Enter</button>
-    <span style="margin-left:auto;color:var(--muted);font-size:0.78rem;align-self:center;">
-        点击屏幕以捕获键盘输入
-    </span>
+    <button class="primary" id="btn-start" onclick="boot()" disabled>▶ 启动 AuroraOS</button>
+    <button id="btn-reset" onclick="doReset()" disabled>↻ 重启</button>
+    <button onclick="sendKey('ctrl+c')" disabled id="btn-cc">⌨ Ctrl+C</button>
+    <button onclick="sendKey('enter')" disabled id="btn-ent">↵ Enter</button>
+    <span style="margin-left:auto;color:var(--muted);font-size:0.75rem;align-self:center;" id="click-hint"></span>
 </div>
 
-<div class="screen-container" id="screen-wrapper">
-    <div style="width:1080px;max-width:100%;margin:0 auto;">
-        <div style="width:80px;height:25px;"></div>
-        <div id="screen" style="position:relative;">
-            <div class="screen-loading" id="loading-overlay">
-                <p id="loading-msg">准备加载 AuroraOS...</p>
-                <div class="loader-bar"><div class="loader-bar-fill" id="loader-fill"></div></div>
-            </div>
+<div class="screen-box" id="screen-wrap">
+    <div id="screen" style="position:relative;">
+        <div class="overlay" id="overlay">
+            <p id="ov-msg">检测环境兼容性...</p>
+            <div class="progress"><div class="progress-fill" id="prog"></div></div>
         </div>
     </div>
 </div>
 
-<div class="info-grid">
-    <div class="info-card">
-        <h3>架构</h3>
-        <div class="val">x86_64</div>
-    </div>
-    <div class="info-card">
-        <h3>代码行数</h3>
-        <div class="val">26,500+</div>
-    </div>
-    <div class="info-card">
-        <h3>模拟器</h3>
-        <div class="val">v86 (WebAssembly)</div>
-    </div>
-    <div class="info-card">
-        <h3>许可证</h3>
-        <div class="val green">MIT</div>
-    </div>
-</div>
-
-<div class="console-log" id="console-log">
-AuroraOS Web v4.0.5 — 基于 v86 x86 模拟器<br>
-等待启动...
-</div>
+<div class="diag" id="diag">🔍 诊断日志：等待初始化...</div>
 
 <footer>
-    AuroraOS &copy; 2024 <a href="https://github.com/zhan1206/aurora-os" target="_blank">zhan1206/aurora-os</a>
-    · 在浏览器中运行 · 100% 自研 x86_64 操作系统 · MIT License
+    AuroraOS © <a href="https://github.com/zhan1206/aurora-os" target="_blank">zhan1206/aurora-os</a>
+    · 100% 自研 x86_64 操作系统 · MIT · 在浏览器中运行
 </footer>
 
-<script src="js/coi-serviceworker.js"></script>
-<script src="js/v86/libv86.js"></script>
 <script>
-// ========== Constants ==========
-const ISO_PATH = 'os.iso';
-const WASM_PATH = 'js/v86/v86.wasm';
-const BIOS_PATH = 'js/v86/seabios.bin';
-const VGABIOS_PATH = 'js/v86/vgabios.bin';
-
-let emulator = null;
-let started = false;
-
-// ========== UI ==========
-function log(msg) {
-    const el = document.getElementById('console-log');
-    el.innerHTML += msg + '<br>';
-    el.scrollTop = el.scrollHeight;
+// ============ Mini COI Service Worker (inline) ============
+if (typeof window !== 'undefined') {
+    if (!window.crossOriginIsolated) {
+        navigator.serviceWorker?.register(
+            URL.createObjectURL(new Blob([
+                'self.addEventListener("install",()=>self.skipWaiting());',
+                'self.addEventListener("activate",e=>e.waitUntil(self.clients.claim()));',
+                'self.addEventListener("fetch",e=>{',
+                '  try{e.respondWith(fetch(e.request).then(r=>{',
+                '    if(r.status===0)return r;',
+                '    var h=new Headers(r.headers);',
+                '    h.set("Cross-Origin-Opener-Policy","same-origin");',
+                '    h.set("Cross-Origin-Embedder-Policy","require-corp");',
+                '    return new Response(r.body,{status:r.status,statusText:r.statusText,headers:h});',
+                '  }))}catch(e){}',
+                '});'
+            ].join(''), {type:'text/javascript'}))
+        ).then(function(reg) {
+            if (reg.active && !navigator.serviceWorker.controller) {
+                D('SW 已激活，准备刷新以生效...');
+                setTimeout(function(){ location.reload(); }, 1000);
+            }
+            reg.addEventListener('updatefound', function() {
+                var w = reg.installing;
+                w.addEventListener('statechange', function() {
+                    if (w.state === 'activated' && navigator.serviceWorker.controller) {
+                        D('SW 更新完成，刷新页面...');
+                        location.reload();
+                    }
+                });
+            });
+        }).catch(function(e) { D('SW 注册失败: '+e.message); });
+    }
 }
 
-function setStatus(elId, cls, text) {
-    const el = document.getElementById(elId);
-    const dot = el.querySelector('.status-dot');
-    dot.className = 'status-dot ' + cls;
-    el.childNodes[1].textContent = ' ' + text;
-}
+// ============ Globals ============
+var EM = null, ST = false;
+var D = function(m) {
+    var e = document.getElementById('diag');
+    e.innerHTML += '\n' + m;
+    e.scrollTop = e.scrollHeight;
+};
+var S = function(id, cls, t) {
+    var e = document.getElementById(id), d = e.querySelector('.dot');
+    d.className = 'dot ' + cls;
+    e.childNodes[1].textContent = ' ' + t;
+};
 
-function setLoading(msg, pct) {
-    document.getElementById('loading-msg').textContent = msg;
-    document.getElementById('loader-fill').style.width = pct + '%';
-}
+// ============ Boot ============
+function boot() {
+    if (ST) return; ST = true;
+    var btn = document.getElementById('btn-start'); btn.disabled = true;
+    var ov = document.getElementById('ov-msg'), pg = document.getElementById('prog');
 
-// ========== v86 Emulator ==========
-function startAuroraOS() {
-    if (started) return;
-    started = true;
-
-    document.getElementById('btn-start').disabled = true;
-    document.getElementById('btn-reset').disabled = false;
-    setStatus('status-emu', 'loading', '模拟器加载中');
-    setLoading('加载 v86 模拟器...', 10);
+    ov.textContent = '加载 v86 模拟器...'; pg.style.width = '20%';
+    D('🚀 开始引导流程...');
 
     try {
-        emulator = new V86({
-            wasm_path: WASM_PATH,
-            bios: { url: BIOS_PATH },
-            vga_bios: { url: VGABIOS_PATH },
-            cdrom: { url: ISO_PATH },
-            memory_size: 256 * 1024 * 1024, // 256 MB
-            vga_memory_size: 16 * 1024 * 1024, // 16 MB
+        EM = new V86({
+            wasm_path: 'js/v86/v86.wasm',
+            bios: { url: 'js/v86/seabios.bin' },
+            vga_bios: { url: 'js/v86/vgabios.bin' },
+            cdrom: { url: 'os.iso' },
+            memory_size: 256 * 1024 * 1024,
+            vga_memory_size: 16 * 1024 * 1024,
             screen_container: document.getElementById('screen'),
             autostart: true,
-            disable_keyboard: false,
-            disable_mouse: false,
-            network_relay_url: '',
             log_level: 1,
         });
-
-        setLoading('启动 v86 模拟器...', 25);
-        setStatus('status-emu', 'running', '模拟器启动成功');
-
-        emulator.add_listener('emulator-loaded', function() {
-            setLoading('硬件初始化...', 40);
-            log('✅ v86 模拟器已加载');
-        });
-
-        emulator.add_listener('screen-set-mode', function(mode) {
-            log('🖥 屏幕模式: ' + mode.width + 'x' + mode.height);
-            setLoading('显示输出已就绪...', 60);
-        });
-
-        emulator.add_listener('serial0-output-bytes', function(data) {
-            var str = '';
-            for (var i = 0; i < data.length; i++) {
-                var c = data[i];
-                if (c >= 32 && c <= 126 || c === 10 || c === 13) {
-                    str += String.fromCharCode(c);
-                }
-            }
-            if (str.length > 0) {
-                var clean = str.replace(/\n/g, '<br>').replace(/ /g, '&nbsp;');
-                // append to log but cap it
-                var el = document.getElementById('console-log');
-                el.innerHTML += '<span style="color:#10b981;">' + clean + '</span>';
-                el.scrollTop = el.scrollHeight;
-                // trim old entries
-                if (el.innerHTML.length > 8000) {
-                    var idx = el.innerHTML.indexOf('<br>', el.innerHTML.length - 6000);
-                    if (idx > 0) el.innerHTML = el.innerHTML.substring(idx + 4);
-                }
-            }
-        });
-
-        emulator.add_listener('emulator-started', function() {
-            setLoading('AuroraOS 内核启动中...', 75);
-            log('🚀 模拟器启动完毕，AuroraOS 内核引导中...');
-            setStatus('status-os', 'loading', 'OS 启动中');
-        });
-
-        // After ~5 seconds, assume booted
-        setTimeout(function() {
-            setLoading('', 100);
-            document.getElementById('loading-overlay').style.display = 'none';
-            setStatus('status-os', 'running', 'OS 运行中');
-            log('✨ AuroraOS 启动成功！点击上方屏幕可输入键盘命令');
-        }, 8000);
-
-    } catch (e) {
-        log('❌ 模拟器启动失败: ' + e.message);
-        setStatus('status-emu', 'error', '加载失败');
-        setLoading('加载失败: ' + e.message, 0);
-        document.getElementById('btn-start').disabled = false;
-        started = false;
+        D('✅ V86 实例已创建');
+        S('s-v86','ok','v86 已加载');
+        ov.textContent = '正在加载 BIOS 和系统镜像...'; pg.style.width = '40%';
+    } catch(e) {
+        D('❌ V86 创建失败: ' + e.message);
+        S('s-v86','err','v86 失败: '+e.message.substring(0,20));
+        ov.textContent = '启动失败: ' + e.message;
+        ST = false; btn.disabled = false;
+        return;
     }
+
+    EM.add_listener('emulator-loaded', function() {
+        D('✅ 模拟器核心已加载');
+        ov.textContent = '硬件初始化中...'; pg.style.width = '55%';
+    });
+
+    EM.add_listener('screen-set-mode', function(m) {
+        D('🖥 屏幕: ' + m.width + 'x' + m.height + ' ('+(m.is_graphical?'图形':'文本')+')');
+        ov.textContent = '屏幕已就绪，引导 ISO...'; pg.style.width = '70%';
+    });
+
+    EM.add_listener('emulator-started', function() {
+        D('✅ 模拟器已启动，内核开始引导');
+        ov.textContent = 'AuroraOS 内核启动中...'; pg.style.width = '85%';
+        S('s-os','ok','OS 启动中');
+    });
+
+    var bootTimer = setTimeout(function() {
+        D('🟢 启动完成！点击上方屏幕进行键盘输入');
+        ov.textContent = '';
+        pg.style.width = '100%';
+        document.getElementById('overlay').style.display = 'none';
+        S('s-os','ok','OS 运行中');
+        document.getElementById('btn-reset').disabled = false;
+        document.getElementById('btn-cc').disabled = false;
+        document.getElementById('btn-ent').disabled = false;
+        document.getElementById('click-hint').textContent = '🖱 点击屏幕捕获键盘';
+    }, 10000);
+
+    EM.add_listener('screen-set-mode', function() { clearTimeout(bootTimer); });
+
+    EM.add_listener('serial0-output-bytes', function(data) {
+        var s = '';
+        for (var i = 0; i < data.length; i++) {
+            var c = data[i];
+            if ((c >= 32 && c <= 126) || c === 10 || c === 13) s += String.fromCharCode(c);
+        }
+        if (s.trimEnd().length > 0) {
+            var e = document.getElementById('diag');
+            e.innerHTML += '\n<span style="color:#10b981">[串口] '+s.replace(/</g,'&lt;').replace(/\n/g,'<br>')+'</span>';
+            e.scrollTop = e.scrollHeight;
+        }
+    });
 }
 
-function resetVM() {
-    if (emulator) {
-        emulator.stop();
-        emulator.destroy();
-        emulator = null;
-    }
-    started = false;
+function doReset() {
+    if (EM) { EM.stop(); EM.destroy(); EM = null; }
+    ST = false;
     document.getElementById('btn-start').disabled = false;
     document.getElementById('btn-reset').disabled = true;
-    document.getElementById('loading-overlay').style.display = 'flex';
-    document.getElementById('console-log').innerHTML = 'AuroraOS Web v4.0.5 — 基于 v86 x86 模拟器<br>等待启动...<br>';
-    setStatus('status-emu', 'loading', '就绪');
-    setStatus('status-os', 'loading', '等待启动');
+    document.getElementById('btn-cc').disabled = true;
+    document.getElementById('btn-ent').disabled = true;
+    document.getElementById('overlay').style.display = 'flex';
+    document.getElementById('ov-msg').textContent = '准备重新启动...';
+    document.getElementById('prog').style.width = '0%';
+    document.getElementById('diag').innerHTML = '🔍 诊断日志：已重置';
+    S('s-v86','loading','v86 就绪');
+    S('s-os','loading','等待启动');
 }
 
-function sendCtrlC() {
-    var screen = document.querySelector('#screen canvas');
-    if (!screen || !emulator) return;
-    var e = new KeyboardEvent('keydown', { keyCode: 67, ctrlKey: true, bubbles: true });
-    screen.dispatchEvent(e);
+function sendKey(k) {
+    var c = document.querySelector('#screen canvas');
+    if (!c || !EM) return;
+    if (k === 'enter') {
+        EM.serial0_send('\n');
+        D('📤 发送: Enter');
+    } else if (k === 'ctrl+c') {
+        var evt = new KeyboardEvent('keydown',{keyCode:67,ctrlKey:true,bubbles:true});
+        c.dispatchEvent(evt);
+        D('📤 发送: Ctrl+C');
+    }
 }
 
-function sendEnter() {
-    if (!emulator) return;
-    emulator.serial0_send('\n');
-}
+// ============ Init ============
+(function init() {
+    D('🔍 检查环境...');
+    var sabOk = !!window.SharedArrayBuffer && !!window.Atomics;
+    D('SharedArrayBuffer: '+(sabOk?'✅ 可用 (crossOriginIsolated='+window.crossOriginIsolated+')':'❌ 不可用'));
+    D('crossOriginIsolated: ' + window.crossOriginIsolated);
+    D('navigator.serviceWorker: ' + (!!navigator.serviceWorker));
+    D('Screen DPR: ' + window.devicePixelRatio + ' | UA: ' + navigator.userAgent.substring(0,80));
 
-// Auto-start after short delay
-window.addEventListener('load', function() {
-    log('AuroraOS Web 前端已就绪');
-    log('🌐 架构: x86_64 | 模拟器: v86 (WebAssembly) | 内核: 26,500+ 行代码');
-    log('📦 系统镜像: ' + ISO_PATH + ' (5.3 MB)');
-    setStatus('status-emu', 'running', '就绪');
-    setStatus('status-os', 'loading', '等待启动');
-    setLoading('点击"启动 AuroraOS"按钮开始体验', 0);
-});
+    if (!sabOk) {
+        // After SW reload, this should be available
+        D('⏳ SharedArrayBuffer 不可用，等待 Service Worker 生效...');
+        S('s-sab','loading','等待 Service Worker');
+        // Poll for it
+        var tries = 0;
+        var iv = setInterval(function() {
+            tries++;
+            var ok = !!window.SharedArrayBuffer && !!window.Atomics;
+            if (ok || tries > 30) {
+                clearInterval(iv);
+                D('poll #'+tries+': SAB='+ok+' crossOriginIsolated='+window.crossOriginIsolated);
+                if (ok) { S('s-sab','ok','SAB 就绪'); ready(); }
+                else { D('❌ SAB 仍不可用，可能需要手动刷新'); S('s-sab','err','请刷新页面'); }
+            }
+        }, 500);
+    } else {
+        S('s-sab','ok','SAB 就绪');
+        ready();
+    }
+})();
+
+function ready() {
+    D('🔍 检查 V86 库...');
+    if (typeof V86 === 'undefined') {
+        D('❌ V86 未定义！libv86.js 加载失败？');
+        S('s-v86','err','V86 未加载');
+        document.getElementById('ov-msg').textContent = 'V86 库加载失败，请刷新重试';
+        return;
+    }
+    D('✅ V86 库已加载');
+    S('s-v86','ok','v86 就绪');
+    S('s-os','loading','等待启动');
+    document.getElementById('btn-start').disabled = false;
+    document.getElementById('ov-msg').textContent = '环境就绪，点击下方按钮启动';
+}
 </script>
 
 </body>
