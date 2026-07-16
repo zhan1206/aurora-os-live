@@ -18,135 +18,104 @@
     --yellow: #f59e0b;
 }
 * { margin: 0; padding: 0; box-sizing: border-box; }
-body {
-    background: var(--bg);
-    color: var(--text);
-    font-family: "Inter", "Segoe UI", system-ui, sans-serif;
-    min-height: 100vh;
-}
-.hero {
-    padding: 14px 20px;
+html, body { height: 100%; background: var(--bg); color: var(--text); font-family: "Inter","Segoe UI",system-ui,sans-serif; }
+
+.topbar {
+    padding: 8px 16px;
     display: flex;
     align-items: center;
     justify-content: space-between;
     border-bottom: 1px solid var(--border);
     background: var(--surface);
     flex-wrap: wrap;
-    gap: 8px;
+    gap: 6px;
 }
-.hero h1 {
-    font-size: 1.2rem;
-    font-weight: 700;
-    background: linear-gradient(135deg, var(--accent-glow), #6366f1);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-}
-.hero .badge {
-    font-size: 0.7rem;
-    background: var(--accent);
-    color: #fff;
-    padding: 2px 8px;
-    border-radius: 12px;
-    font-weight: 600;
-}
-.status-bar { display: flex; gap: 10px; font-size: 0.75rem; color: var(--muted); flex-wrap: wrap; }
-.status-bar span { display: flex; align-items: center; gap: 4px; }
-.dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
-.dot.loading { background: var(--yellow); animation: pulse 1.2s infinite; }
-.dot.ok { background: var(--green); }
-.dot.err { background: var(--red); }
-@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+.topbar h1 { font-size: 1.1rem; background: linear-gradient(135deg,var(--accent-glow),#6366f1); -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text; }
+.status-row { display:flex; gap:8px; font-size:0.72rem; color:var(--muted); flex-wrap:wrap; }
+.status-row span { display:flex; align-items:center; gap:3px; }
+.dot { width:7px; height:7px; border-radius:50%; display:inline-block; flex-shrink:0; }
+.dot.loading{background:var(--yellow);animation:pulse 1.2s infinite;}
+.dot.ok{background:var(--green)}.dot.err{background:var(--red)}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
 
-.controls {
-    padding: 8px 20px;
+.bar {
+    padding: 6px 16px;
     display: flex;
     gap: 6px;
     border-bottom: 1px solid var(--border);
     background: var(--surface);
     flex-wrap: wrap;
+    align-items: center;
 }
-.controls button {
-    padding: 6px 14px;
+.bar button {
+    padding: 5px 12px;
     border: 1px solid var(--border);
-    border-radius: 6px;
+    border-radius: 5px;
     background: transparent;
     color: var(--text);
-    font-size: 0.78rem;
+    font-size: 0.75rem;
     cursor: pointer;
-    transition: all 0.2s;
 }
-.controls button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent-glow); }
-.controls button:disabled { opacity: 0.4; cursor: not-allowed; }
-.controls button.primary {
-    background: var(--accent);
-    border-color: var(--accent);
-    color: #fff;
-    font-weight: 600;
-}
-.controls button.primary:hover:not(:disabled) { background: #6d28d9; }
+.bar button:hover:not(:disabled){border-color:var(--accent);color:var(--accent-glow)}
+.bar button:disabled{opacity:.4;cursor:not-allowed}
+.bar button.go{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+.bar button.go:hover:not(:disabled){background:#6d28d9}
+.bar .hint{margin-left:auto;font-size:.7rem;color:var(--muted)}
 
-.screen-box {
-    margin: 10px 20px;
+.wrap {
+    margin: 8px 16px 0;
     border: 2px solid var(--border);
-    border-radius: 8px;
-    overflow: hidden;
+    border-radius: 6px;
     background: #000;
     position: relative;
-    min-height: 180px;
+    /* fixed 4:3 aspect ratio container */
+    width: min(960px, calc(100vw - 36px));
+    max-width: 100%;
+    aspect-ratio: 4 / 3;
+    overflow: hidden;
 }
-.screen-box canvas { display: block; width: 100%; image-rendering: pixelated; }
+.wrap canvas { width: 100%; height: 100%; display: block; }
 
-.overlay {
+.note {
     position: absolute;
     inset: 0;
     display: flex;
     align-items: center;
     justify-content: center;
     flex-direction: column;
-    gap: 12px;
-    background: rgba(0,0,0,0.88);
-    z-index: 20;
+    gap: 10px;
+    background: rgba(0,0,0,.9);
+    z-index: 10;
 }
-.overlay p { color: var(--muted); font-size: 0.85rem; text-align: center; max-width: 80%; }
-.progress {
-    width: 220px;
-    height: 4px;
-    background: var(--border);
-    border-radius: 2px;
-    overflow: hidden;
-}
-.progress-fill {
-    height: 100%;
-    background: var(--accent);
-    width: 0%;
-    transition: width 0.5s ease;
-}
+.note p { color: var(--muted); font-size: .82rem; max-width: 75%; text-align: center; }
+.bar2 { width:180px; height:3px; background:var(--border); border-radius:2px; overflow:hidden; }
+.bar2f { height:100%; background:var(--accent); width:0%; transition:width .4s ease; }
 
-.diag {
-    margin: 10px 20px 20px;
+.log {
+    margin: 8px 16px 16px;
     background: var(--surface);
     border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 12px;
-    max-height: 240px;
+    border-radius: 6px;
+    padding: 10px 14px;
+    max-height: 160px;
     overflow-y: auto;
-    font-family: "JetBrains Mono", "Cascadia Code", monospace;
-    font-size: 0.72rem;
+    font-family: "JetBrains Mono","Cascadia Code",monospace;
+    font-size: .68rem;
     line-height: 1.5;
     color: var(--muted);
     white-space: pre-wrap;
     word-break: break-all;
 }
-.diag .ok { color: var(--green); }
-.diag .err { color: var(--red); }
-.diag .warn { color: var(--yellow); }
+.log span.ok { color: var(--green); }
+.log span.err { color: var(--red); }
+.log span.warn { color: var(--yellow); }
+.log span.out { color: #6ee7b7; }
 
 footer {
     text-align: center;
-    padding: 10px;
+    padding: 6px;
     color: var(--muted);
-    font-size: 0.68rem;
+    font-size: .65rem;
     border-top: 1px solid var(--border);
 }
 footer a { color: var(--accent-glow); text-decoration: none; }
@@ -154,241 +123,229 @@ footer a { color: var(--accent-glow); text-decoration: none; }
 </head>
 <body>
 
-<div class="hero">
-    <div style="display:flex;align-items:center;gap:8px;">
-        <h1>AuroraOS</h1>
-        <span class="badge">v4.0.5</span>
-    </div>
-    <div class="status-bar">
-        <span id="s-sab"><span class="dot loading"></span> SharedArrayBuffer</span>
-        <span id="s-v86"><span class="dot loading"></span> v86</span>
-        <span id="s-os"><span class="dot loading"></span> OS</span>
+<div class="topbar">
+    <h1>AuroraOS</h1>
+    <span style="font-size:.7rem;background:var(--accent);color:#fff;padding:2px 8px;border-radius:10px;">v4.0.5</span>
+    <div class="status-row">
+        <span id="st-sab"><span class="dot loading"></span> SAB</span>
+        <span id="st-v86"><span class="dot loading"></span> v86</span>
+        <span id="st-os"><span class="dot loading"></span> OS</span>
     </div>
 </div>
 
-<div class="controls">
-    <button class="primary" id="btn-start" onclick="boot()" disabled>▶ 启动 AuroraOS</button>
-    <button id="btn-reset" onclick="doReset()" disabled>↻ 重启</button>
-    <button onclick="sendKey('ctrl+c')" disabled id="btn-cc">⌨ Ctrl+C</button>
-    <button onclick="sendKey('enter')" disabled id="btn-ent">↵ Enter</button>
-    <span style="margin-left:auto;color:var(--muted);font-size:0.75rem;align-self:center;" id="click-hint"></span>
+<div class="bar">
+    <button class="go" id="btn-go" onclick="boot()" disabled>▶ 启动</button>
+    <button id="btn-rst" onclick="reset_()" disabled>↻ 重启</button>
+    <button id="btn-cc" onclick="k('ctrl+c')" disabled>Ctrl+C</button>
+    <button id="btn-enter" onclick="k('enter')" disabled>Enter</button>
+    <span class="hint" id="hint-txt"></span>
 </div>
 
-<div class="screen-box" id="screen-wrap">
-    <div id="screen" style="position:relative;">
-        <div class="overlay" id="overlay">
-            <p id="ov-msg">检测环境兼容性...</p>
-            <div class="progress"><div class="progress-fill" id="prog"></div></div>
-        </div>
+<div class="wrap" id="screen-host">
+    <div class="note" id="ov">
+        <p id="ov-msg">检测环境...</p>
+        <div class="bar2"><div class="bar2f" id="barf"></div></div>
     </div>
 </div>
 
-<div class="diag" id="diag">🔍 诊断日志：等待初始化...</div>
+<div class="log" id="log">🔍 诊断日志</div>
 
 <footer>
     AuroraOS © <a href="https://github.com/zhan1206/aurora-os" target="_blank">zhan1206/aurora-os</a>
-    · 100% 自研 x86_64 操作系统 · MIT · 在浏览器中运行
+    · 100% 自研 · x86_64 · MIT
 </footer>
 
 <script>
-// ============ Mini COI Service Worker (inline) ============
-if (typeof window !== 'undefined') {
-    if (!window.crossOriginIsolated) {
-        navigator.serviceWorker?.register(
-            URL.createObjectURL(new Blob([
-                'self.addEventListener("install",()=>self.skipWaiting());',
-                'self.addEventListener("activate",e=>e.waitUntil(self.clients.claim()));',
-                'self.addEventListener("fetch",e=>{',
-                '  try{e.respondWith(fetch(e.request).then(r=>{',
-                '    if(r.status===0)return r;',
-                '    var h=new Headers(r.headers);',
-                '    h.set("Cross-Origin-Opener-Policy","same-origin");',
-                '    h.set("Cross-Origin-Embedder-Policy","require-corp");',
-                '    return new Response(r.body,{status:r.status,statusText:r.statusText,headers:h});',
-                '  }))}catch(e){}',
-                '});'
-            ].join(''), {type:'text/javascript'}))
-        ).then(function(reg) {
-            if (reg.active && !navigator.serviceWorker.controller) {
-                D('SW 已激活，准备刷新以生效...');
-                setTimeout(function(){ location.reload(); }, 1000);
-            }
-            reg.addEventListener('updatefound', function() {
-                var w = reg.installing;
-                w.addEventListener('statechange', function() {
-                    if (w.state === 'activated' && navigator.serviceWorker.controller) {
-                        D('SW 更新完成，刷新页面...');
-                        location.reload();
-                    }
-                });
-            });
-        }).catch(function(e) { D('SW 注册失败: '+e.message); });
-    }
-}
+// ======== COI Service Worker via blob URL ========
+(function(){
+    if (window.crossOriginIsolated) { L('SAB 环境已就绪 (crossOriginIsolated=true)'); return; }
+    L('crossOriginIsolated=false，注册 COI Service Worker...');
+    if (!navigator.serviceWorker) { L('❌ Service Worker 不支持！请用 Chrome/Edge/Firefox'); return; }
+    var blob = new Blob([
+        '"use strict";',
+        'var h={"Cross-Origin-Embedder-Policy":"require-corp","Cross-Origin-Opener-Policy":"same-origin"};',
+        'self.addEventListener("install",function(){self.skipWaiting()});',
+        'self.addEventListener("activate",function(e){e.waitUntil(self.clients.claim())});',
+        'self.addEventListener("fetch",function(e){',
+        'try{e.respondWith(fetch(e.request).then(function(r){',
+        'if(r.status===0)return r;',
+        'var rH=new Headers(r.headers);',
+        'Object.keys(h).forEach(function(k){rH.set(k,h[k])});',
+        'return new Response(r.body,{status:r.status,statusText:r.statusText,headers:rH});',
+        '}))}catch(ex){console.error("coi-sw fetch fail",ex)}',
+        '});'
+    ].join('\n'), {type:'application/javascript'});
 
-// ============ Globals ============
-var EM = null, ST = false;
-var D = function(m) {
-    var e = document.getElementById('diag');
+    var swUrl = URL.createObjectURL(blob);
+    navigator.serviceWorker.register(swUrl, {scope:'/'}).then(function(reg){
+        L('SW 注册成功');
+        if (reg.active && !navigator.serviceWorker.controller) {
+            L('SW 已激活但未控制页面，即将刷新...');
+            setTimeout(function(){ location.reload(); }, 800);
+        } else if (reg.waiting) {
+            L('SW 等待激活，通知跳过...');
+            reg.waiting.postMessage({type:'SKIP_WAITING'});
+            setTimeout(function(){ location.reload(); }, 800);
+        }
+        reg.addEventListener('updatefound', function(){
+            var w = reg.installing;
+            if (!w) return;
+            w.addEventListener('statechange', function(){
+                L('SW state: ' + w.state);
+                if (w.state === 'activated' && navigator.serviceWorker.controller) {
+                    L('刷新激活 SW...');
+                    location.reload();
+                }
+            });
+        });
+    }).catch(function(e){ L('❌ SW注册失败: '+e.message); });
+})();
+
+// ======== LOG ========
+function L(m) {
+    var e = document.getElementById('log');
     e.innerHTML += '\n' + m;
     e.scrollTop = e.scrollHeight;
-};
-var S = function(id, cls, t) {
+}
+function SS(id, cls, txt) {
     var e = document.getElementById(id), d = e.querySelector('.dot');
     d.className = 'dot ' + cls;
-    e.childNodes[1].textContent = ' ' + t;
-};
+    e.childNodes[1].textContent = ' ' + txt;
+}
 
-// ============ Boot ============
-function boot() {
-    if (ST) return; ST = true;
-    var btn = document.getElementById('btn-start'); btn.disabled = true;
-    var ov = document.getElementById('ov-msg'), pg = document.getElementById('prog');
+// ======== DETECT ========
+function init(){
+    L('detect: SAB='+!!window.SharedArrayBuffer+' Atomics='+!!window.Atomics+' crossOriginIsolated='+window.crossOriginIsolated);
+    L('V86 loaded: '+ (typeof V86 !== 'undefined'));
+    if (typeof V86 === 'undefined') { SS('st-v86','err','未加载'); document.getElementById('ov-msg').textContent='V86 库加载失败，请刷新'; return; }
+    SS('st-v86','ok','已加载');
+    if (!window.SharedArrayBuffer || !window.Atomics) {
+        L('未 crossOriginIsolated - 如果你看到这行说明 SW 还没生效，请手动刷新一次 (Ctrl+Shift+R)');
+        SS('st-sab','loading','请手动刷新');
+        document.getElementById('ov-msg').textContent = '请在页面首次加载后手动刷新一次 (Ctrl+Shift+R 或 F5)';
+        document.getElementById('btn-go').disabled = false; // let them try anyway
+        return;
+    }
+    SS('st-sab','ok','就绪');
+    SS('st-os','loading','等待启动');
+    document.getElementById('btn-go').disabled = false;
+    document.getElementById('ov-msg').textContent = '环境已就绪，点击 ▶ 启动';
+}
+window.addEventListener('DOMContentLoaded', init);
 
-    ov.textContent = '加载 v86 模拟器...'; pg.style.width = '20%';
-    D('🚀 开始引导流程...');
+// ======== BOOT ========
+var em = null, started = false;
+function boot(){
+    if (started) return; started = true;
+    var host = document.getElementById('screen-host');
+    var ov = document.getElementById('ov'), ovm = document.getElementById('ov-msg'), pf = document.getElementById('barf');
+
+    ovm.textContent = '创建 V86 实例...'; pf.style.width = '15%';
 
     try {
-        EM = new V86({
+        em = new V86({
             wasm_path: 'js/v86/v86.wasm',
             bios: { url: 'js/v86/seabios.bin' },
             vga_bios: { url: 'js/v86/vgabios.bin' },
             cdrom: { url: 'os.iso' },
             memory_size: 256 * 1024 * 1024,
             vga_memory_size: 16 * 1024 * 1024,
-            screen_container: document.getElementById('screen'),
+            screen_container: host,
             autostart: true,
             log_level: 1,
         });
-        D('✅ V86 实例已创建');
-        S('s-v86','ok','v86 已加载');
-        ov.textContent = '正在加载 BIOS 和系统镜像...'; pg.style.width = '40%';
+        L('✅ V86 实例已创建');
+        SS('st-v86','ok','运行中');
     } catch(e) {
-        D('❌ V86 创建失败: ' + e.message);
-        S('s-v86','err','v86 失败: '+e.message.substring(0,20));
-        ov.textContent = '启动失败: ' + e.message;
-        ST = false; btn.disabled = false;
+        L('❌ 创建失败: '+e.message);
+        ovm.textContent = '创建失败: '+e.message;
+        started = false;
+        document.getElementById('btn-go').disabled = false;
         return;
     }
 
-    EM.add_listener('emulator-loaded', function() {
-        D('✅ 模拟器核心已加载');
-        ov.textContent = '硬件初始化中...'; pg.style.width = '55%';
+    em.add_listener('emulator-loaded', function(){
+        L('✅ 模拟器核心加载完成'); pf.style.width='50%';
+        ovm.textContent = '加载 ISO 引导镜像...';
     });
 
-    EM.add_listener('screen-set-mode', function(m) {
-        D('🖥 屏幕: ' + m.width + 'x' + m.height + ' ('+(m.is_graphical?'图形':'文本')+')');
-        ov.textContent = '屏幕已就绪，引导 ISO...'; pg.style.width = '70%';
+    em.add_listener('screen-set-mode', function(m){
+        L('🖥 屏幕就绪: '+m.width+'x'+m.height);
+        ovm.textContent = 'AuroraOS 启动中...'; pf.style.width='75%';
+        SS('st-os','ok','启动中');
     });
 
-    EM.add_listener('emulator-started', function() {
-        D('✅ 模拟器已启动，内核开始引导');
-        ov.textContent = 'AuroraOS 内核启动中...'; pg.style.width = '85%';
-        S('s-os','ok','OS 启动中');
+    em.add_listener('emulator-started', function(){
+        L('✅ 模拟器已启动');
+        SS('st-os','ok','运行中');
     });
 
-    var bootTimer = setTimeout(function() {
-        D('🟢 启动完成！点击上方屏幕进行键盘输入');
-        ov.textContent = '';
-        pg.style.width = '100%';
-        document.getElementById('overlay').style.display = 'none';
-        S('s-os','ok','OS 运行中');
-        document.getElementById('btn-reset').disabled = false;
+    var t = setTimeout(function(){
+        L('🟢 启动完成！');
+        ov.style.display = 'none';
+        document.getElementById('btn-rst').disabled = false;
         document.getElementById('btn-cc').disabled = false;
-        document.getElementById('btn-ent').disabled = false;
-        document.getElementById('click-hint').textContent = '🖱 点击屏幕捕获键盘';
-    }, 10000);
+        document.getElementById('btn-enter').disabled = false;
+        document.getElementById('hint-txt').textContent = '🖱 点击屏幕捕获键盘';
+    }, 12000);
 
-    EM.add_listener('screen-set-mode', function() { clearTimeout(bootTimer); });
+    // Cancel timeout early if screen mode was set
+    var modeSet = false;
+    em.add_listener('screen-set-mode', function(){
+        if (modeSet) return; modeSet = true;
+        // Wait a few more seconds after screen is ready
+        setTimeout(function(){
+            if (ov.style.display !== 'none') {
+                L('🟢 屏幕已显示');
+                ov.style.display = 'none';
+                document.getElementById('btn-rst').disabled = false;
+                document.getElementById('btn-cc').disabled = false;
+                document.getElementById('btn-enter').disabled = false;
+                document.getElementById('hint-txt').textContent = '🖱 点击屏幕捕获键盘';
+            }
+            clearTimeout(t);
+        }, 5000);
+    });
 
-    EM.add_listener('serial0-output-bytes', function(data) {
+    // Serial output
+    em.add_listener('serial0-output-bytes', function(d){
         var s = '';
-        for (var i = 0; i < data.length; i++) {
-            var c = data[i];
-            if ((c >= 32 && c <= 126) || c === 10 || c === 13) s += String.fromCharCode(c);
+        for (var i = 0; i < d.length; i++) {
+            var c = d[i];
+            if ((c>=32 && c<=126) || c===10 || c===13) s += String.fromCharCode(c);
         }
-        if (s.trimEnd().length > 0) {
-            var e = document.getElementById('diag');
-            e.innerHTML += '\n<span style="color:#10b981">[串口] '+s.replace(/</g,'&lt;').replace(/\n/g,'<br>')+'</span>';
-            e.scrollTop = e.scrollHeight;
+        if (s.trim()) {
+            var le = document.getElementById('log');
+            le.innerHTML += '\n<span class="out">[串口] '+s.replace(/</g,'&lt;').replace(/\n/g,'<br>')+'</span>';
+            le.scrollTop = le.scrollHeight;
         }
     });
 }
 
-function doReset() {
-    if (EM) { EM.stop(); EM.destroy(); EM = null; }
-    ST = false;
-    document.getElementById('btn-start').disabled = false;
-    document.getElementById('btn-reset').disabled = true;
+function reset_(){
+    if (em) { em.stop(); em.destroy(); em = null; }
+    started = false;
+    document.getElementById('btn-go').disabled = false;
+    document.getElementById('btn-rst').disabled = true;
     document.getElementById('btn-cc').disabled = true;
-    document.getElementById('btn-ent').disabled = true;
-    document.getElementById('overlay').style.display = 'flex';
-    document.getElementById('ov-msg').textContent = '准备重新启动...';
-    document.getElementById('prog').style.width = '0%';
-    document.getElementById('diag').innerHTML = '🔍 诊断日志：已重置';
-    S('s-v86','loading','v86 就绪');
-    S('s-os','loading','等待启动');
+    document.getElementById('btn-enter').disabled = true;
+    document.getElementById('hint-txt').textContent = '';
+    document.getElementById('ov').style.display = 'flex';
+    document.getElementById('ov-msg').textContent = '已重置，点击启动';
+    document.getElementById('barf').style.width = '0%';
+    document.getElementById('log').innerHTML = '🔍 诊断日志';
+    SS('st-os','loading','等待启动');
 }
 
-function sendKey(k) {
-    var c = document.querySelector('#screen canvas');
-    if (!c || !EM) return;
-    if (k === 'enter') {
-        EM.serial0_send('\n');
-        D('📤 发送: Enter');
-    } else if (k === 'ctrl+c') {
-        var evt = new KeyboardEvent('keydown',{keyCode:67,ctrlKey:true,bubbles:true});
-        c.dispatchEvent(evt);
-        D('📤 发送: Ctrl+C');
+function k(type){
+    if (!em) return;
+    if (type === 'enter') { em.serial0_send('\n'); L('📤 Enter'); }
+    else if (type === 'ctrl+c') {
+        var c = document.querySelector('#screen-host canvas');
+        if (c) c.dispatchEvent(new KeyboardEvent('keydown',{keyCode:67,ctrlKey:true,bubbles:true}));
+        L('📤 Ctrl+C');
     }
-}
-
-// ============ Init ============
-(function init() {
-    D('🔍 检查环境...');
-    var sabOk = !!window.SharedArrayBuffer && !!window.Atomics;
-    D('SharedArrayBuffer: '+(sabOk?'✅ 可用 (crossOriginIsolated='+window.crossOriginIsolated+')':'❌ 不可用'));
-    D('crossOriginIsolated: ' + window.crossOriginIsolated);
-    D('navigator.serviceWorker: ' + (!!navigator.serviceWorker));
-    D('Screen DPR: ' + window.devicePixelRatio + ' | UA: ' + navigator.userAgent.substring(0,80));
-
-    if (!sabOk) {
-        // After SW reload, this should be available
-        D('⏳ SharedArrayBuffer 不可用，等待 Service Worker 生效...');
-        S('s-sab','loading','等待 Service Worker');
-        // Poll for it
-        var tries = 0;
-        var iv = setInterval(function() {
-            tries++;
-            var ok = !!window.SharedArrayBuffer && !!window.Atomics;
-            if (ok || tries > 30) {
-                clearInterval(iv);
-                D('poll #'+tries+': SAB='+ok+' crossOriginIsolated='+window.crossOriginIsolated);
-                if (ok) { S('s-sab','ok','SAB 就绪'); ready(); }
-                else { D('❌ SAB 仍不可用，可能需要手动刷新'); S('s-sab','err','请刷新页面'); }
-            }
-        }, 500);
-    } else {
-        S('s-sab','ok','SAB 就绪');
-        ready();
-    }
-})();
-
-function ready() {
-    D('🔍 检查 V86 库...');
-    if (typeof V86 === 'undefined') {
-        D('❌ V86 未定义！libv86.js 加载失败？');
-        S('s-v86','err','V86 未加载');
-        document.getElementById('ov-msg').textContent = 'V86 库加载失败，请刷新重试';
-        return;
-    }
-    D('✅ V86 库已加载');
-    S('s-v86','ok','v86 就绪');
-    S('s-os','loading','等待启动');
-    document.getElementById('btn-start').disabled = false;
-    document.getElementById('ov-msg').textContent = '环境就绪，点击下方按钮启动';
 }
 </script>
-
 </body>
 </html>
