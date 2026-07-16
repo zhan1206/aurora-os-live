@@ -8,14 +8,7 @@
 #include "../mem.h"
 #include <stdint.h>
 
-/* Byte order conversion */
-static inline uint16_t ntohs(uint16_t n) {
-    return ((n & 0xFF) << 8) | ((n & 0xFF00) >> 8);
-}
-
-static inline uint16_t htons(uint16_t n) {
-    return ntohs(n);
-}
+/* Byte order conversion now in net.h */
 
 /* DNS server address */
 static uint8_t dns_server_ip[4] = { 8, 8, 8, 8 };  /* Default: Google DNS */

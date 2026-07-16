@@ -1236,6 +1236,10 @@ uint32_t fat32_alloc_cluster(struct fat32_sb_info *sbi) {
     return fat32_find_free_cluster(sbi);
 }
 
+/* Forward declarations for file_ops (defined at end of file) */
+static struct file_ops fat32_file_ops;
+static struct file_ops fat32_dir_ops;
+
 /* ================================================================
  * Internal: create a VFS inode from FAT32 entry data
  * ================================================================ */

@@ -146,7 +146,7 @@ struct run_queue {
     struct task_struct *head;  /* circular linked list of ready tasks */
     struct rb_root ready_tree; /* red-black tree for O(log n) vruntime-ordered scheduling */
     int count;                 /* number of tasks in queue */
-    int lock;                  /* simple spin flag (protected by interrupt disable) */
+    volatile uint32_t lock;    /* spinlock (spinlock_t, defined inline to avoid circular include) */
 };
 
 /* ============ Scheduler API ============ */

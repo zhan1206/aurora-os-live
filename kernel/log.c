@@ -10,6 +10,7 @@
 #include "include/log.h"
 #include <stdarg.h>
 #include <stddef.h>
+#include <stdint.h>
 #include <string.h>
 
 /* Low-level output */

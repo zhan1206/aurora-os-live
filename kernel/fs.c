@@ -27,6 +27,10 @@
 #include "devtmpfs.h"
 #include "sysfs.h"
 #include "journal.h"
+
+void embed_init(void) {
+    /* Stub: embed_init not needed for ISO build */
+}
 #include "fsck.h"
 #include "squashfs.h"
 

@@ -1,39 +1,10 @@
-# Build artifacts
-/build/
-os.iso
-/iso/
-*.o
-*.elf
-
-# Unikernel build artifacts
-/build_unikernel/
-/iso_unikernel/
-unikernel.iso
-
-# Editor
+build/
+iso/
+node_modules/
+package-lock.json
+__pycache__/
+*.pyc
 .vscode/
-.idea/
-*.swp
-*.swo
-*~
+*.zip
+*.tar.gz
 .DS_Store
-Thumbs.db
-
-# Logs
-*.log
-*.txt
-
-# Generated embedded files
-kernel/embedded_files.c
-
-# Compiled userspace binaries
-userspace/hello
-userspace/shell
-
-# Temporary and backup files
-*.bak
-*.tmp
-*.orig
-
-# OS files
-desktop.ini

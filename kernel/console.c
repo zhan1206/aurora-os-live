@@ -313,9 +313,6 @@ static void update_hw_cursor(void) {
  * simultaneous console output from multiple cores can cause
  * screen corruption.
  * ================================================================ */
-typedef struct {
-    volatile uint32_t locked;
-} spinlock_t;
 
 static spinlock_t console_out_lock = {0};
 
@@ -542,6 +539,24 @@ void console_write(const char *s) {
     for (size_t i = 0; s && s[i]; ++i) console_putc(s[i]);
 }
 
+void console_write_itoa(int val) {
+    char buf[16];
+    int i = 0;
+    if (val < 0) {
+        console_putc('-');
+        val = -val;
+    }
+    if (val == 0) {
+        console_putc('0');
+        return;
+    }
+    while (val > 0) {
+        buf[i++] = '0' + (val % 10);
+        val /= 10;
+    }
+    while (i-- > 0) console_putc(buf[i]);
+}
+
 /* ================================================================
  * ANSI escape sequence parser
  *
@@ -678,6 +693,8 @@ void console_write_ansi(const char *s) {
 /* ================================================================
  * Init
  * ================================================================ */
+static spinlock_t inbuf_lock;     /* protects inbuf from SMP concurrent access */
+
 void console_init(void) {
     uint16_t fill = (uint16_t)' ' | ((uint16_t)0x07 << 8);
     for (int i = 0; i < ROWS * COLS; ++i) VGA_BUF[i] = fill;
@@ -713,8 +730,6 @@ static int  inbuf_cursor = 0;   /* cursor position within line (0..inbuf_len) */
 static int  line_ready   = 0;
 static int  saved_line_len = 0;  /* saved length when line becomes ready */
 static int  insert_mode  = 1;   /* 1 = insert, 0 = overwrite */
-static spinlock_t inbuf_lock;     /* protects inbuf from SMP concurrent access */
-
 /* Escape sequence state machine */
 #define ESC_STATE_NORMAL   0
 #define ESC_STATE_ESC      1

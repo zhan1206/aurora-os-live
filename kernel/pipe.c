@@ -28,6 +28,10 @@
 
 #define PIPE_BUF_SIZE 4096
 
+/* Forward declarations for file operation structs */
+static struct file_ops pipe_read_ops;
+static struct file_ops pipe_write_ops;
+
 /* Simple spinlock for pipe SMP safety */
 static inline void pipe_spin_lock(volatile uint32_t *lock) {
     while (1) {

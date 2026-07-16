@@ -154,11 +154,11 @@ void aslr_init(void) {
 
     /* Try RDRAND for additional entropy (may not be available) */
     uint64_t rdrand_val = 0;
-    int rdrand_ok = 0;
+    unsigned char rdrand_ok = 0;
     asm volatile (
         "rdrand %0\n\t"
         "setc %1"
-        : "=r"(rdrand_val), "=r"(rdrand_ok)
+        : "=r"(rdrand_val), "=qm"(rdrand_ok)
         :
         : "cc"
     );

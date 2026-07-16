@@ -33,6 +33,8 @@
 #include "rbtree.h"
 #include "module.h"
 #include "elf.h"
+
+#define PIE_DEFAULT_BASE    0x555555554000ULL
 #include <string.h>
 #include <stdint.h>
 

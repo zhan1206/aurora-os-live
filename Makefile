@@ -85,7 +85,7 @@ UEFI_EFI := $(ISODIR)/EFI/BOOT/BOOTX64.EFI
 
 # Find all source files
 K_C_SRCS := $(shell find $(SRCDIR) -type f -name '*.c' 2>/dev/null)
-K_S_SRCS := $(shell find $(SRCDIR) arch -type f -name '*.S' 2>/dev/null)
+K_S_SRCS := $(shell find $(SRCDIR) arch -type f -name '*.S' 2>/dev/null | grep -v '/aarch64/' | grep -v '/riscv64/' | grep -v '/loongarch64/')
 
 OBJS := $(patsubst $(SRCDIR)/%.c,$(BUILDDIR)/%.o,$(K_C_SRCS))
 OBJS += $(patsubst arch/%.S,$(BUILDDIR)/arch/%.o,$(filter arch/%,$(K_S_SRCS)))

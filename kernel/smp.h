@@ -193,6 +193,19 @@ static inline void irq_restore(uint64_t flags) {
     );
 }
 
+/* Acquire spinlock, save interrupt flags, return saved flags */
+static inline uint32_t spin_lock_irqsave(spinlock_t *lock) {
+    uint32_t flags = (uint32_t)irq_save();
+    spin_lock(lock);
+    return flags;
+}
+
+/* Release spinlock and restore interrupt flags */
+static inline void spin_unlock_irqrestore(spinlock_t *lock, uint32_t flags) {
+    (void)lock;
+    irq_restore((uint64_t)flags);
+}
+
 /* ================================================================
  * Ticket spinlock (fair, scalable alternative)
  * ================================================================ */

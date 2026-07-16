@@ -25,6 +25,7 @@
 #include "mem.h"
 #include "include/log.h"
 #include "include/assert.h"
+#include "pagetable.h"
 #include "../boot/boot_info.h"
 #include "perf.h"
 #include <stdint.h>
@@ -131,18 +132,18 @@ static inline void spin_unlock(spinlock_t *lock) {
  * local variable, avoiding the SMP race where multiple CPUs would
  * overwrite a shared saved_flags field in the spinlock_t struct.
  */
-static inline void spin_lock_irqsave(spinlock_t *lock, uint32_t *flags) {
-    uint32_t f;
+static inline uint32_t spin_lock_irqsave(spinlock_t *lock) {
+    uint64_t flags64;
     asm volatile (
-        "pushfl\n\t"
-        "popl %0\n\t"
+        "pushfq\n\t"
+        "popq %0\n\t"
         "cli"
-        : "=r"(f)
+        : "=r"(flags64)
         :
         : "memory"
     );
-    *flags = f;
     spin_lock(lock);
+    return (uint32_t)flags64;
 }
 
 /*
@@ -152,11 +153,12 @@ static inline void spin_lock_irqsave(spinlock_t *lock, uint32_t *flags) {
  */
 static inline void spin_unlock_irqrestore(spinlock_t *lock, uint32_t flags) {
     spin_unlock(lock);
+    uint64_t flags64 = (uint64_t)flags;
     asm volatile (
-        "pushl %0\n\t"
-        "popfl"
+        "pushq %0\n\t"
+        "popfq"
         :
-        : "r"(flags)
+        : "r"(flags64)
         : "memory"
     );
 }
@@ -171,10 +173,10 @@ static spinlock_t slab_lock_  = {0};
  * interrupt flags, avoiding the SMP race where multiple CPUs
  * would share a single saved_flags field.
  */
-#define buddy_lock()   do { uint32_t __buddy_saved_flags; spin_lock_irqsave(&buddy_lock_, &__buddy_saved_flags)
-#define buddy_unlock() spin_unlock_irqrestore(&buddy_lock_, __buddy_saved_flags); } while(0)
-#define slab_lock()    do { uint32_t __slab_saved_flags; spin_lock_irqsave(&slab_lock_, &__slab_saved_flags)
-#define slab_unlock()  spin_unlock_irqrestore(&slab_lock_, __slab_saved_flags); } while(0)
+#define buddy_lock()   uint32_t __buddy_saved_flags = spin_lock_irqsave(&buddy_lock_)
+#define buddy_unlock() spin_unlock_irqrestore(&buddy_lock_, __buddy_saved_flags)
+#define slab_lock()    uint32_t __slab_saved_flags = spin_lock_irqsave(&slab_lock_)
+#define slab_unlock()  spin_unlock_irqrestore(&slab_lock_, __slab_saved_flags)
 
 /* ================================================================
  * Buddy system internal data

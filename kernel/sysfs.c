@@ -42,7 +42,7 @@ struct sysfs_inode_data {
  * File operations
  * ================================================================ */
 
-static int sysfs_read(struct file *filp, void *buf, size_t count, off_t *offset) {
+static ssize_t sysfs_read(struct file *filp, void *buf, size_t count, off_t *offset) {
     struct sysfs_inode_data *d = (struct sysfs_inode_data *)filp->inode->priv;
     if (!d || !d->entry || !d->entry->read_fn) return -1;
 
@@ -81,6 +81,10 @@ static int sysfs_open(struct inode *inode, struct file *filp) {
 static int sysfs_close(struct inode *inode, struct file *filp) {
     (void)inode; (void)filp; return 0;
 }
+
+/* Forward declarations of file_ops structs (defined below) */
+static struct file_ops sysfs_file_ops;
+static struct file_ops sysfs_dir_ops;
 
 static int sysfs_lookup(struct inode *dir, struct dentry *dentry) {
     struct sysfs_inode_data *d = (struct sysfs_inode_data *)dir->priv;
@@ -125,7 +129,7 @@ static int sysfs_lookup(struct inode *dir, struct dentry *dentry) {
 
 static struct file_ops sysfs_file_ops = {
     .open   = sysfs_open,
-    .read   = sysfs_read,
+    .read   = (void*)sysfs_read,
     .write  = sysfs_write,
     .close  = sysfs_close,
     .lookup = NULL,

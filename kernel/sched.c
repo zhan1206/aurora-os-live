@@ -10,6 +10,7 @@
 
 #include "sched.h"
 #include "smp.h"
+#include "syscall.h"
 #include "include/log.h"
 #include "include/assert.h"
 #include "rbtree.h"
@@ -47,7 +48,7 @@ uint64_t min_vruntime = 0;
 int smp_sched_ready = 0;
 
 /* Current CPU ID helper (0 = BSP, increments for each AP) */
-static inline int current_cpu_id(void) {
+int current_cpu_id(void) {
     /* Before SMP init, GS base is 0 (set by syscall_init).
      * Reading %%gs:0 would dereference address 0, potentially
      * causing a page fault. Return 0 (BSP) until SMP is ready. */

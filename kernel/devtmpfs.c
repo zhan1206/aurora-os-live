@@ -135,7 +135,7 @@ static ssize_t dev_console_write(struct file *filp, const void *buf, size_t coun
  * Returns 1 on success, 0 if RDRAND is not available or failed.
  */
 static int rdrand32(uint32_t *val) {
-    int ok = 0;
+    unsigned char ok = 0;
     asm volatile (
         "1:\n\t"
         "rdrand %0\n\t"

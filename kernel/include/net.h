@@ -5,6 +5,22 @@
 #define NET_H
 
 #include <stdint.h>
+#include <stddef.h>
+
+/* Network byte order helpers */
+static inline uint16_t ntohs(uint16_t n) {
+    return ((n & 0xFF) << 8) | ((n >> 8) & 0xFF);
+}
+static inline uint16_t htons(uint16_t n) {
+    return ntohs(n);
+}
+static inline uint32_t ntohl(uint32_t n) {
+    return ((n & 0xFF) << 24) | ((n & 0xFF00) << 8) |
+           ((n & 0xFF0000) >> 8) | ((n & 0xFF000000) >> 24);
+}
+static inline uint32_t htonl(uint32_t n) {
+    return ntohl(n);
+}
 
 /* ================================================================
  * Ethernet
