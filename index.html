@@ -156,49 +156,52 @@ footer a { color: var(--accent-glow); text-decoration: none; }
 </footer>
 
 <script>
-// ======== COI Service Worker via blob URL ========
+// ======== COI Service Worker ========
 (function(){
-    if (window.crossOriginIsolated) { L('SAB 环境已就绪 (crossOriginIsolated=true)'); return; }
-    L('crossOriginIsolated=false，注册 COI Service Worker...');
-    if (!navigator.serviceWorker) { L('❌ Service Worker 不支持！请用 Chrome/Edge/Firefox'); return; }
-    var blob = new Blob([
-        '"use strict";',
-        'var h={"Cross-Origin-Embedder-Policy":"require-corp","Cross-Origin-Opener-Policy":"same-origin"};',
-        'self.addEventListener("install",function(){self.skipWaiting()});',
-        'self.addEventListener("activate",function(e){e.waitUntil(self.clients.claim())});',
-        'self.addEventListener("fetch",function(e){',
-        'try{e.respondWith(fetch(e.request).then(function(r){',
-        'if(r.status===0)return r;',
-        'var rH=new Headers(r.headers);',
-        'Object.keys(h).forEach(function(k){rH.set(k,h[k])});',
-        'return new Response(r.body,{status:r.status,statusText:r.statusText,headers:rH});',
-        '}))}catch(ex){console.error("coi-sw fetch fail",ex)}',
-        '});'
-    ].join('\n'), {type:'application/javascript'});
-
-    var swUrl = URL.createObjectURL(blob);
-    navigator.serviceWorker.register(swUrl, {scope:'/'}).then(function(reg){
-        L('SW 注册成功');
-        if (reg.active && !navigator.serviceWorker.controller) {
-            L('SW 已激活但未控制页面，即将刷新...');
-            setTimeout(function(){ location.reload(); }, 800);
-        } else if (reg.waiting) {
-            L('SW 等待激活，通知跳过...');
-            reg.waiting.postMessage({type:'SKIP_WAITING'});
-            setTimeout(function(){ location.reload(); }, 800);
+    if (window.crossOriginIsolated) {
+        L('SAB 环境已就绪 ✓');
+        SS('st-sab','ok','就绪');
+        checkReady();
+        return;
+    }
+    L('crossOriginIsolated=false, 注册 SW...');
+    if (!navigator.serviceWorker) {
+        L('❌ 浏览器不支持 ServiceWorker, 无法运行');
+        SS('st-sab','err','浏览器不支持');
+        document.getElementById('ov-msg').textContent = '需要使用 Chrome/Edge/Firefox 来运行';
+        return;
+    }
+    // Unregister any old SW first
+    navigator.serviceWorker.getRegistrations().then(function(regs){
+        return Promise.all(regs.map(function(r){ return r.unregister(); }));
+    }).then(function(){
+        return navigator.serviceWorker.register('sw.js', {scope:'/'});
+    }).then(function(reg){
+        L('SW 注册成功, 等待激活...');
+        if (reg.installing) {
+            reg.installing.addEventListener('statechange', function(){
+                L('SW state: '+reg.installing.state);
+            });
         }
         reg.addEventListener('updatefound', function(){
             var w = reg.installing;
             if (!w) return;
             w.addEventListener('statechange', function(){
-                L('SW state: ' + w.state);
-                if (w.state === 'activated' && navigator.serviceWorker.controller) {
-                    L('刷新激活 SW...');
-                    location.reload();
+                if (w.state === 'activated') {
+                    L('SW 已激活, 1.5秒后刷新...');
+                    setTimeout(function(){ location.reload(); }, 1500);
                 }
             });
         });
-    }).catch(function(e){ L('❌ SW注册失败: '+e.message); });
+        if (reg.active) {
+            L('SW 已激活, 刷新以生效...');
+            setTimeout(function(){ location.reload(); }, 1000);
+        }
+    }).catch(function(e){
+        L('❌ SW 注册失败: '+e.message);
+        SS('st-sab','err','SW 失败');
+        document.getElementById('ov-msg').textContent = 'Service Worker 注册失败，请用 Chrome 打开';
+    });
 })();
 
 // ======== LOG ========
@@ -215,15 +218,19 @@ function SS(id, cls, txt) {
 
 // ======== DETECT ========
 function init(){
-    L('detect: SAB='+!!window.SharedArrayBuffer+' Atomics='+!!window.Atomics+' crossOriginIsolated='+window.crossOriginIsolated);
+    L('SAB='+!!window.SharedArrayBuffer+' Atomics='+!!window.Atomics+' crossOriginIsolated='+window.crossOriginIsolated);
     L('V86 loaded: '+ (typeof V86 !== 'undefined'));
-    if (typeof V86 === 'undefined') { SS('st-v86','err','未加载'); document.getElementById('ov-msg').textContent='V86 库加载失败，请刷新'; return; }
+    if (typeof V86 === 'undefined') { SS('st-v86','err','未加载'); return; }
     SS('st-v86','ok','已加载');
+    checkReady();
+}
+
+function checkReady(){
     if (!window.SharedArrayBuffer || !window.Atomics) {
-        L('未 crossOriginIsolated - 如果你看到这行说明 SW 还没生效，请手动刷新一次 (Ctrl+Shift+R)');
-        SS('st-sab','loading','请手动刷新');
-        document.getElementById('ov-msg').textContent = '请在页面首次加载后手动刷新一次 (Ctrl+Shift+R 或 F5)';
-        document.getElementById('btn-go').disabled = false; // let them try anyway
+        L('⚠ 未 crossOriginIsolated - 如果已刷新过仍看到此提示，请手动 Ctrl+Shift+R');
+        SS('st-sab','err','未就绪');
+        document.getElementById('ov-msg').textContent = '请刷新页面 (Ctrl+Shift+R)';
+        document.getElementById('btn-go').disabled = false; // let user try anyway
         return;
     }
     SS('st-sab','ok','就绪');
